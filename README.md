@@ -5,7 +5,7 @@ An SSH agent whose keys live on your phone: every signature is approved, and mad
 - `server/` — Spring Boot (port 9091). The phone pages are server-rendered Thymeleaf templates;
   sign requests are rendered to HTML on the server and pushed over Server-Sent Events, htmx just
   swaps them into the page.
-- `cli/` — plain Java 25 client (no Spring): the agent itself, plus enrolment and key listing, talking
+- `cli/` — plain Java 25 client (no Spring, also builds as a GraalVM native executable): the agent itself, plus enrolment and key listing, talking
   to the server's `/api` endpoints.
 
 Public URL: https://ssha.apps.maykelange.com/ (load balancer → this machine:9091)
@@ -16,6 +16,17 @@ Requires JDK 25 (Spring Boot 4.1). `mise.toml` pins Temurin 25 for this director
 fails fast with a clear message on an older JDK.
 
     mvn package
+
+### Native CLI (GraalVM)
+
+`mise.toml` also installs GraalVM CE 25 (Temurin stays the default JDK). Build a native executable with
+
+    mise run native        # → cli/target/ssha-cli (≈35 MB, starts in milliseconds, no JDK needed)
+
+It needs gcc and the zlib development files (`sudo apt install zlib1g-dev` on Debian/Ubuntu). The CLI
+uses only Jackson's streaming API (`Json`), so there is no reflection to configure. Like the jar, the
+executable finds the project's `data/` folder from its own location; a copy elsewhere needs
+`$SSHA_TOKEN`, and its agent socket goes to `./data/agent.sock`.
 
 ## Run the server
 

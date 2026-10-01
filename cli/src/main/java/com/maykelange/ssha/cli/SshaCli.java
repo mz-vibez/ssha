@@ -12,7 +12,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -25,8 +24,6 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
 
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Command-line side of ssha.
@@ -72,9 +69,6 @@ public final class SshaCli {
     private final URI base;
     private final String token;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-    private final JsonMapper json = JsonMapper.builder()
-            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-            .build();
 
     private SshaCli(String url, String token) {
         this.base = URI.create(url.endsWith("/") ? url : url + "/");
@@ -83,11 +77,15 @@ public final class SshaCli {
 
     /**
      * The project folder (the one holding {@code server/} and {@code cli/}), found by walking up from
-     * the running jar or classes directory; falls back to the working directory.
+     * the running jar or classes directory, or from the executable when running as a native image;
+     * falls back to the working directory.
      */
     static Path projectDir() {
         String classPath = System.getProperty("java.class.path", "").split(java.io.File.pathSeparator)[0];
-        for (Path dir = Path.of(classPath).toAbsolutePath(); dir != null; dir = dir.getParent()) {
+        Path start = classPath.isEmpty()
+                ? ProcessHandle.current().info().command().map(Path::of).orElse(Path.of(""))
+                : Path.of(classPath);
+        for (Path dir = start.toAbsolutePath(); dir != null; dir = dir.getParent()) {
             if (Files.isRegularFile(dir.resolve("server/pom.xml")) && Files.isRegularFile(dir.resolve("cli/pom.xml"))) {
                 return dir;
             }
@@ -160,7 +158,7 @@ public final class SshaCli {
                 System.err.println("enroll failed: HTTP " + response.statusCode() + " " + response.body());
                 return false;
             }
-            EnrollLink link = json.readValue(response.body(), EnrollLink.class);
+            EnrollLink link = Json.enrollLink(response.body());
             System.out.println("Scan with your phone to sign in once and add a passkey:");
             System.out.println();
             System.out.print(qr(link.url()));
@@ -215,7 +213,7 @@ public final class SshaCli {
         if (response.statusCode() != 200) {
             throw new IOException("HTTP " + response.statusCode());
         }
-        List<AgentKey> keys = Arrays.asList(json.readValue(response.body(), AgentKey[].class));
+        List<AgentKey> keys = Json.agentKeys(response.body());
         keys.forEach(k -> keyLabels.put(HexFormat.of().formatHex(k.publicKey()), k.label()));
         return keys;
     }
@@ -226,13 +224,13 @@ public final class SshaCli {
         HttpRequest request = request("api/sign")
                 .timeout(Duration.ofMinutes(5))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(sign)))
+                .POST(HttpRequest.BodyPublishers.ofString(Json.signRequest(sign)))
                 .build();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
         switch (response.statusCode()) {
             case 200 -> {
                 log("approved");
-                return json.readValue(response.body(), SignResponse.class).signature();
+                return Json.signResponse(response.body()).signature();
             }
             case 401 -> throw new UnauthorizedException();
             case 403 -> log("denied on the phone");

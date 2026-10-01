@@ -13,14 +13,26 @@
     <artifactId>ssha-cli</artifactId>
 
     <dependencies>
+        <!-- Streaming API only (see Json): no data binding, so no reflection in the native image. -->
         <dependency>
             <groupId>tools.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
+            <artifactId>jackson-core</artifactId>
         </dependency>
         <dependency>
             <groupId>com.google.zxing</groupId>
             <artifactId>core</artifactId>
             <version>3.5.4</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -37,4 +49,42 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            Native executable cli/target/ssha-cli, built with GraalVM: `mise run native`.
+            Not called "native": Spring Boot's parent defines that profile for Spring applications
+            (it runs Spring AOT processing, which a plain CLI doesn't have).
+        -->
+        <profile>
+            <id>native-cli</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>${native-build-tools-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                                <phase>package</phase>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <imageName>ssha-cli</imageName>
+                            <!-- The classes, not the repackaged (BOOT-INF/...) executable jar. -->
+                            <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+                            <mainClass>com.maykelange.ssha.cli.SshaCli</mainClass>
+                            <buildArgs>
+                                <buildArg>--no-fallback</buildArg>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
