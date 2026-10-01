@@ -110,3 +110,16 @@ Things to know:
 All `/api` endpoints need `Authorization: Bearer <token>`; everything else needs a signed-in session.
 
 Pending sign requests are kept in memory; a server restart fails them (ssh just reports an agent error).
+
+## License
+
+Copyright (C) 2026 Maykel AL ZREIBI
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+General Public License as published by the Free Software Foundation, either version 3 of the License, or (at
+your option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+[LICENSE](LICENSE) for the full text.
+
+Because the server is meant to be used over a network, the AGPL requires that if you run a modified version
+for others, you offer them its source code.
