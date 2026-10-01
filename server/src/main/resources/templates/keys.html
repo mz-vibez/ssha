@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/head :: meta('ssha · SSH keys')}"></th:block>
+</head>
+<body class="page">
+<main class="card">
+    <p><a href="/">← Sign requests</a></p>
+    <h1>SSH keys</h1>
+
+    <p class="notice" th:if="${keys.isEmpty()}">
+        No SSH keys yet. Create one below, then run <code>ssha-cli agent</code> on your computer.
+    </p>
+    <ul class="keys" th:unless="${keys.isEmpty()}">
+        <li th:each="k : ${keys}" th:attr="data-ssh-key=${k.id}">
+            <div class="row">
+                <div>
+                    <strong th:text="${k.label}">laptop</strong>
+                    <div class="hint"><span th:text="${k.type()}">ED25519</span> · <code th:text="${k.fingerprint()}">SHA256:…</code></div>
+                    <div class="hint" data-ssh-device>checking this device…</div>
+                </div>
+                <form method="post" th:action="@{/keys/{id}/delete(id=${k.id})}" data-ssh-delete>
+                    <button type="submit" class="danger">Delete</button>
+                </form>
+            </div>
+            <textarea class="pubkey" readonly rows="3" aria-label="authorized_keys line"
+                      th:text="${k.authorizedKey()}">ssh-ed25519 AAAA…</textarea>
+        </li>
+    </ul>
+
+    <h2>New key</h2>
+    <p class="hint">
+        Generated on this phone and stored in this browser, encrypted with your passkey. Every use needs
+        your approval with the passkey. If this browser's data is cleared, the key is gone.
+    </p>
+    <p class="error" id="error" hidden></p>
+    <form class="inline" data-ssh-new-key>
+        <input name="label" type="text" required maxlength="100" value="phone" aria-label="Key name">
+        <button type="submit" class="primary">Create</button>
+    </form>
+
+    <h2>Import a key</h2>
+    <p class="hint">
+        An Ed25519 or RSA (2048 bits or more) private key: an OpenSSH key file (<code>~/.ssh/id_ed25519</code>,
+        <code>~/.ssh/id_rsa</code>; passphrase-protected or not), PKCS#1 or PKCS#8 PEM. It is read and encrypted on this phone; only the public key goes to the server.
+        Importing the same key on another device makes it usable there too.
+    </p>
+    <p class="error" id="import-error" hidden></p>
+    <form class="stacked" data-ssh-import>
+        <input name="file" type="file" aria-label="Key file">
+        <textarea name="key" rows="4" required spellcheck="false" autocomplete="off"
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" aria-label="Private key"></textarea>
+        <input name="passphrase" type="password" autocomplete="off" placeholder="Passphrase (if any)"
+               aria-label="Passphrase">
+        <input name="label" type="text" maxlength="100" placeholder="Name (default: the key's comment)"
+               aria-label="Key name">
+        <button type="submit" class="primary">Import</button>
+    </form>
+
+    <h2>Use it</h2>
+    <p class="hint">
+        Add the key's line to <code>~/.ssh/authorized_keys</code> on a server (or as an SSH key on GitHub),
+        run <code>ssha-cli agent</code> on your computer and point <code>SSH_AUTH_SOCK</code> at the socket it
+        prints. Sign requests then show up on the start page for you to approve.
+    </p>
+</main>
+<script src="/sshkey-import.js" defer></script>
+<script src="/ssh.js" defer></script>
+</body>
+</html>

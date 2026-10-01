@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/head :: meta('ssha · sign in')}"></th:block>
+</head>
+<body class="page">
+<main class="card">
+    <h1>ssha</h1>
+    <th:block th:if="${token}">
+        <p>Sign in with the one-time link from <code>ssha-cli enroll</code>, then add a passkey for this device.</p>
+        <form method="post" th:action="@{/login/ott}">
+            <input type="hidden" name="token" th:value="${token}">
+            <button type="submit" class="primary">Continue</button>
+        </form>
+    </th:block>
+    <p class="error" th:unless="${token}">This link is incomplete. Run <code>ssha-cli enroll</code> for a new one.</p>
+</main>
+</body>
+</html>

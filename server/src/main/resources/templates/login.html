@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/head :: meta('ssha · sign in')}"></th:block>
+</head>
+<body class="page">
+<main class="card">
+    <h1>ssha</h1>
+    <p class="notice" th:if="${param.logout}">You are signed out.</p>
+    <p class="error" th:if="${param.error}">Sign-in failed. Try again, or get a new link with <code>ssha-cli enroll</code>.</p>
+    <p class="error" id="error" hidden></p>
+
+    <button type="button" class="primary" data-passkey-login>Sign in with passkey</button>
+
+    <p class="hint">No passkey on this device yet? Run <code>ssha-cli enroll</code> on your computer and scan the QR code.</p>
+</main>
+<script src="/webauthn.js" defer></script>
+</body>
+</html>

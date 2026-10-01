@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/head :: meta('ssha · passkeys')}"></th:block>
+</head>
+<body class="page">
+<main class="card">
+    <p><a href="/">← Sign requests</a></p>
+    <h1>Passkeys</h1>
+
+    <p class="notice" th:if="${passkeys.isEmpty()}">
+        You have no passkeys yet. Add one so you can sign in on this device without a link.
+    </p>
+    <ul class="passkeys" th:unless="${passkeys.isEmpty()}">
+        <li th:each="p : ${passkeys}" th:with="zone=${T(java.time.ZoneId).systemDefault()}">
+            <div>
+                <strong th:text="${p.label}">Phone</strong>
+                <div class="hint">
+                    added <span th:text="${#temporals.format(p.created.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span><th:block th:if="${p.lastUsed}">,
+                    last used <span th:text="${#temporals.format(p.lastUsed.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span></th:block>
+                </div>
+            </div>
+            <form method="post" th:action="@{/passkeys/{id}/delete(id=${p.credentialId.toBase64UrlString()})}"
+                  onsubmit="return confirm('Delete this passkey?')">
+                <button type="submit" class="danger">Delete</button>
+            </form>
+        </li>
+    </ul>
+
+    <h2>Add a passkey</h2>
+    <p class="error" id="error" hidden></p>
+    <form class="inline" data-passkey-register>
+        <input name="label" type="text" required maxlength="100" value="Phone" aria-label="Passkey name">
+        <button type="submit" class="primary">Add</button>
+    </form>
+</main>
+<script src="/webauthn.js" defer></script>
+</body>
+</html>
