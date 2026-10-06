@@ -1,0 +1,37 @@
+# ssha with Docker Compose, without building an image: the stock Temurin JRE image runs the server
+# jar from ./app, and everything it stores goes to ./data.
+#
+# Folder layout:
+#   docker-compose.yml   this file
+#   app/ssha-server.jar  from `mvn package` (server/target/ssha-server.jar)
+#   data/                passkeys, accounts, keys' public halves, push key: back this up
+#
+# Edit the values marked EDIT, then `docker compose up -d` in that folder.
+services:
+  ssha:
+    image: eclipse-temurin:25-jre
+    container_name: ssha
+    restart: unless-stopped
+    # EDIT: the host user that owns ./data (`id -u`:`id -g`).
+    user: "1000:1000"
+    environment:
+      # EDIT: shown times (sign request cards) use this zone.
+      TZ: Europe/Paris
+    command:
+      - java
+      - -XX:MaxRAMPercentage=75
+      - -jar
+      - /app/ssha-server.jar
+      - --ssha.data-dir=/data
+      # EDIT: the public domain Caddy serves. Passkeys are bound to it; changing it later invalidates them.
+      - --ssha.rp-id=ssha.apps.maykelange.com
+      - --ssha.allowed-origins=https://ssha.apps.maykelange.com
+      - --ssha.vapid-subject=https://ssha.apps.maykelange.com
+    volumes:
+      - ./app:/app:ro
+      - ./data:/data
+    ports:
+      # Only reachable from the host itself, i.e. by a Caddy running there. If Caddy runs elsewhere, use
+      # "9091:9091" and firewall the port so only Caddy reaches it.
+      - "127.0.0.1:9091:9091"
+    mem_limit: 512m

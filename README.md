@@ -34,6 +34,29 @@ executable finds the project's `data/` folder from its own location; a copy else
 
     java -jar server/target/ssha-server.jar
 
+## Deploy with Docker
+
+No image to build or registry needed: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) runs the jar in the
+stock `eclipse-temurin:25-jre` image, with the jar and the data in folders on the host. Caddy terminates HTTPS and
+forwards to it ([`deploy/Caddyfile`](deploy/Caddyfile)).
+
+1. On the host, create a folder with subfolders `app` and `data`.
+2. Build with `mvn package` and copy `server/target/ssha-server.jar` to `app/`.
+3. Copy `deploy/docker-compose.yml` into the folder and edit the lines marked `EDIT`: the user that owns `data/`,
+   the time zone and the domain.
+4. `docker compose up -d` in the folder. The server listens on `127.0.0.1:9091` on the host.
+5. Add the [`deploy/Caddyfile`](deploy/Caddyfile) site block to Caddy and reload it.
+
+Updating: copy the new jar over `app/ssha-server.jar` and `docker compose restart`. Schema changes apply themselves
+on start.
+
+Moving an existing server: stop it, copy its `data/` folder (`ssha.mv.db`, `vapid`, and `token` if present) into
+the new folder's `data/`, make it owned by the user from the compose file, then start the container. Keep the same
+domain, or the passkeys stop working.
+
+Back up `data/`: it holds the accounts, passkeys, computers' token hashes, the public keys and the push key. The
+private SSH keys are never there; they only live on the phones.
+
 ## Use the CLI
 
     java -jar cli/target/ssha-cli.jar                 # first run: create an account (see Accounts below)

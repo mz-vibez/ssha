@@ -1,0 +1,5 @@
+# Add to Caddy's configuration. Caddy gets the certificate, sets X-Forwarded-Proto/-Host/-For (which
+# the server honours), and streams the start page's Server-Sent Events without buffering.
+ssha.apps.maykelange.com {
+	reverse_proxy 127.0.0.1:9091
+}
