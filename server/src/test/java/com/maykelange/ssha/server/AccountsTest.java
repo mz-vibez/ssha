@@ -36,6 +36,7 @@ import com.jayway.jsonpath.JsonPath;
 
 @SpringBootTest(properties = {
         "ssha.rp-id=localhost",
+        "ssha.vapid-key-file=",
         "ssha.allowed-origins=http://localhost",
         "spring.datasource.url=jdbc:h2:mem:ssha-accounts-test;DB_CLOSE_DELAY=-1",
 })
@@ -215,14 +216,14 @@ class AccountsTest {
         jdbc.update("insert into ssh_keys (id, label, public_key, created) values ('k', 'phone', X'00', current_timestamp)");
         Path tokenFile = Files.writeString(dir.resolve("token"), "old-token\n");
 
-        Accounts migrated = new Accounts(jdbc, new SshaProperties("localhost", null, true, tokenFile, null, null));
+        Accounts migrated = new Accounts(jdbc, new SshaProperties("localhost", null, true, tokenFile, null, null, null, null, null));
         String account = jdbc.queryForObject("select id from accounts", String.class);
         assertThat(jdbc.queryForObject("select name from user_entities", String.class)).isEqualTo(account);
         assertThat(jdbc.queryForObject("select account_id from ssh_keys", String.class)).isEqualTo(account);
         assertThat(migrated.authenticate("old-token")).get().extracting(Accounts.Client::accountId).isEqualTo(account);
 
         // Only once.
-        new Accounts(jdbc, new SshaProperties("localhost", null, true, tokenFile, null, null));
+        new Accounts(jdbc, new SshaProperties("localhost", null, true, tokenFile, null, null, null, null, null));
         assertThat(jdbc.queryForObject("select count(*) from accounts", Integer.class)).isEqualTo(1);
     }
 

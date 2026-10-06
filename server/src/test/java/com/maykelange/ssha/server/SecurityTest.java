@@ -25,6 +25,7 @@ import com.jayway.jsonpath.JsonPath;
 
 @SpringBootTest(properties = {
         "ssha.rp-id=localhost",
+        "ssha.vapid-key-file=",
         "ssha.allowed-origins=http://localhost",
         "spring.datasource.url=jdbc:h2:mem:ssha-test;DB_CLOSE_DELAY=-1",
 })

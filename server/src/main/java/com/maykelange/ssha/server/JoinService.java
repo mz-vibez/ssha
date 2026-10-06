@@ -38,12 +38,15 @@ public class JoinService {
     private final StreamHub streams;
     private final TemplateEngine templates;
     private final SshaProperties props;
+    private final PushService push;
 
-    public JoinService(Accounts accounts, StreamHub streams, TemplateEngine templates, SshaProperties props) {
+    public JoinService(Accounts accounts, StreamHub streams, TemplateEngine templates, SshaProperties props,
+                       PushService push) {
         this.accounts = accounts;
         this.streams = streams;
         this.templates = templates;
         this.props = props;
+        this.push = push;
         streams.onConnect((account, emitter) -> pending(account).forEach(p -> streams.send(emitter, "sign", render(p))));
     }
 
@@ -71,6 +74,10 @@ public class JoinService {
             streams.broadcast(accountId, "sign", "<div id=\"join-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
         });
         streams.broadcast(accountId, "sign", render(p));
+        push.notify(accountId, new PushService.Notification("New computer",
+                p.client() + " (" + p.address() + ") wants to join this account"
+                        + (p.code().isEmpty() ? "" : ", code " + p.code()),
+                "join-" + p.id(), props.joinTimeout()));
         return p.result();
     }
 

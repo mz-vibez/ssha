@@ -176,3 +176,18 @@ textarea.pubkey {
     background: var(--bg);
     color: var(--text);
 }
+
+/* Notifications banner on the start page */
+.push {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    font-size: 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+.push[hidden], .push button[hidden] { display: none; }
+.push span { flex: 1; }
+.push button { font-size: 14px; padding: 8px 12px; white-space: nowrap; }

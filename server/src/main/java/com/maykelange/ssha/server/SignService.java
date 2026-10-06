@@ -66,11 +66,13 @@ public class SignService {
     private final StreamHub streams;
     private final TemplateEngine templates;
     private final SshaProperties props;
+    private final PushService push;
 
-    public SignService(StreamHub streams, TemplateEngine templates, SshaProperties props) {
+    public SignService(StreamHub streams, TemplateEngine templates, SshaProperties props, PushService push) {
         this.streams = streams;
         this.templates = templates;
         this.props = props;
+        this.push = push;
         // A page that (re)connects gets every request of its account that is still waiting.
         streams.onConnect((account, emitter) -> pending(account).forEach(p -> streams.send(emitter, "sign", render(p))));
     }
@@ -94,6 +96,7 @@ public class SignService {
             streams.broadcast(key.accountId(), "sign", "<div id=\"sign-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
         });
         streams.broadcast(key.accountId(), "sign", render(p));
+        push.notify(key.accountId(), notification(p));
         return p.result();
     }
 
@@ -125,6 +128,21 @@ public class SignService {
             throw new NoSuchElementException("no such request (answered or expired)");
         }
         return p;
+    }
+
+    private PushService.Notification notification(Pending p) {
+        SignDetails d = p.details();
+        StringBuilder body = new StringBuilder(p.client()).append(" wants to use key ").append(p.key().label());
+        if (d.user() != null) {
+            body.append(" as ").append(d.user());
+        }
+        if (d.namespace() != null) {
+            body.append(" (").append(d.namespace()).append(')');
+        }
+        if (d.warning() != null) {
+            body.append(". ").append(d.warning());
+        }
+        return new PushService.Notification(d.kind(), body.toString(), "sign-" + p.id(), props.signTimeout());
     }
 
     private String render(Pending p) {

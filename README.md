@@ -96,9 +96,28 @@ Things to know:
 - The key exists only in that browser's storage. Clearing site data, or iOS evicting it (Safari can drop
   storage of sites unused for 7 days; adding the page to the home screen avoids that), loses the key — keep
   a second key or another way in for anything important.
-- The start page has to be open on the phone to see requests (no push notifications yet).
+- **Notifications:** tap *Turn on notifications* on the start page to be notified of every sign and join request,
+  even with the page closed (see *Phone app* below). Answering still happens on the start page.
 - The phone runs JavaScript served by this server, so whoever controls the server could serve code that
   copies a key while it's unlocked. Fine for a self-hosted server; a hardware key is stronger.
+
+## Phone app
+
+The phone pages are a PWA: install it with *Add to Home Screen* (iOS: Share menu; Android Chrome: menu → *Install
+app*). It opens full screen, from its own icon.
+
+- **Push notifications** use standard Web Push (VAPID, `aes128gcm`), implemented with the JDK's own crypto in
+  `WebPush`. The server's key pair is generated into `data/vapid` on first start; deleting it invalidates every
+  subscription (browsers then offer to turn notifications on again). `ssha.vapid-subject` is the contact URL the push
+  services see. The server only sends to Google, Mozilla, Apple and Microsoft push services (`ssha.push-hosts`).
+- A notification holds only what the request card shows (kind, key, user, computer, join code). It is end-to-end
+  encrypted to the browser; the push service can't read it.
+- **iPhone:** Web Push only works in the Home Screen app (iOS 16.4+), so the button shows there and not in Safari.
+  The Home Screen app has its **own storage, separate from Safari's**: create or import SSH keys from inside the app,
+  since keys stored in Safari aren't visible to it. Passkeys are shared. Being on the Home Screen also stops iOS
+  from evicting the keys after 7 days of not using Safari for the site.
+- Signing out turns notifications off for that browser. A computer's or browser's subscription follows whichever
+  account last signed in there.
 
 ## Authentication
 
@@ -126,6 +145,8 @@ Things to know:
 | GET    | `/`             | phone   | Start page: sign requests waiting for approval                |
 | GET    | `/stream`       | phone   | SSE of rendered sign request cards; pending ones on connect   |
 | POST   | `/signup`       | phone   | Create an account and sign in to it; → `/passkeys?new`         |
+| POST   | `/push/subscribe` | phone | `PushSubscription.toJSON()`; 204                             |
+| POST   | `/push/unsubscribe` | phone | `{endpoint}`; 204                                            |
 | GET    | `/clients`      | phone   | Computers with access to the account; remove them             |
 | POST   | `/join/{id}/accept` | phone | Accept a computer's join request; 204                        |
 | POST   | `/join/{id}/deny` | phone | 204                                                           |

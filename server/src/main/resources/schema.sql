@@ -61,3 +61,14 @@ create table if not exists clients
 );
 
 alter table ssh_keys add column if not exists account_id varchar(64);
+
+-- Web Push subscriptions of the account's browsers and home-screen apps.
+create table if not exists push_subscriptions
+(
+    endpoint   varchar(2000) not null,
+    account_id varchar(64)   not null,
+    p256dh     varbinary(65) not null,
+    auth       varbinary(16) not null,
+    created    timestamp     not null,
+    primary key (endpoint)
+);
