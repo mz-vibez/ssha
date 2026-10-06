@@ -86,7 +86,6 @@ final class Json {
             g.writeName("publicKey").writeBinary(request.publicKey());
             g.writeName("data").writeBinary(request.data());
             g.writeName("flags").writeNumber(request.flags());
-            g.writeName("client").writeString(request.client());
             g.writeName("binding");
             SshAgent.Binding b = request.binding();
             if (b == null) {

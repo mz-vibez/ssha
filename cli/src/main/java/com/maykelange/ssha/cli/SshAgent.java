@@ -18,6 +18,7 @@ import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -35,11 +36,16 @@ public final class SshAgent {
     private static final int SSH_AGENT_SIGN_RESPONSE = 14;
     private static final int SSH_AGENTC_EXTENSION = 27;
     private static final int MAX_MESSAGE = 256 * 1024;
+    /** Most session bindings one connection may record (OpenSSH's ssh-agent allows 16 too). */
+    private static final int MAX_BINDINGS = 16;
 
     public record Identity(byte[] publicKey, String comment) {
     }
 
-    /** OpenSSH's session-bind@openssh.com: which host (key) the connection's logins are for. */
+    /**
+     * OpenSSH's session-bind@openssh.com: which host (key) the connection's logins are for. As sent to
+     * the phone, {@code forwarded} means the connection came through a forwarded agent on any hop.
+     */
     public record Binding(byte[] hostKey, byte[] sessionId, byte[] signature, boolean forwarded) {
     }
 
@@ -94,7 +100,9 @@ public final class SshAgent {
         try (channel;
              DataInputStream in = new DataInputStream(new BufferedInputStream(Channels.newInputStream(channel)));
              DataOutputStream out = new DataOutputStream(new BufferedOutputStream(Channels.newOutputStream(channel)))) {
-            Binding binding = null;
+            // Every ssh on the way binds the connection: through a forwarded agent, first the hop that
+            // forwards it (forwarded = true), then the ssh that logs in from there (forwarded = false).
+            List<Binding> bindings = new ArrayList<>();
             while (true) {
                 int length;
                 try {
@@ -109,11 +117,10 @@ public final class SshAgent {
                 byte[] reply;
                 switch (r.byte8()) {
                     case SSH_AGENTC_REQUEST_IDENTITIES -> reply = identities();
-                    case SSH_AGENTC_SIGN_REQUEST -> reply = sign(r.string(), r.string(), r.uint32(), binding);
+                    case SSH_AGENTC_SIGN_REQUEST -> reply = sign(r.string(), r.string(), r.uint32(), summary(bindings));
                     case SSH_AGENTC_EXTENSION -> {
                         if (r.utf8().equals("session-bind@openssh.com")) {
-                            binding = new Binding(r.string(), r.string(), r.string(), r.byte8() != 0);
-                            reply = new byte[] {SSH_AGENT_SUCCESS};
+                            reply = bind(bindings, new Binding(r.string(), r.string(), r.string(), r.byte8() != 0));
                         } else {
                             reply = new byte[] {SSH_AGENT_FAILURE};
                         }
@@ -127,6 +134,29 @@ public final class SshAgent {
         } catch (IOException | RuntimeException e) {
             SshaCli.log("agent connection error: " + e.getMessage());
         }
+    }
+
+    /**
+     * Records a binding. Like OpenSSH's ssh-agent, a connection bound for authentication (not for
+     * forwarding) can't be bound again, so the far end can't re-label it as another host.
+     */
+    static byte[] bind(List<Binding> bindings, Binding binding) {
+        if (bindings.size() >= MAX_BINDINGS || (!bindings.isEmpty() && !bindings.getLast().forwarded())) {
+            SshaCli.log("refused a session binding: this connection is already bound");
+            return new byte[] {SSH_AGENT_FAILURE};
+        }
+        bindings.add(binding);
+        return new byte[] {SSH_AGENT_SUCCESS};
+    }
+
+    /** The binding the phone sees: the last hop's host, flagged as forwarded if any hop forwarded the agent. */
+    static Binding summary(List<Binding> bindings) {
+        if (bindings.isEmpty()) {
+            return null;
+        }
+        Binding last = bindings.getLast();
+        boolean forwarded = bindings.stream().anyMatch(Binding::forwarded);
+        return new Binding(last.hostKey(), last.sessionId(), last.signature(), forwarded);
     }
 
     private byte[] identities() {

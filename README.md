@@ -84,11 +84,13 @@ The CLI targets the public URL by default; override with `--url http://localhost
   The CLI prints the id and a QR code for adding the account's first passkey on the phone.
   Or start on the phone: **Create an account** on the sign-in page creates one, signs the browser in and opens the
   passkeys page to add its passkey; then add computers to it as below.
-  Set `ssha.open-registration=false` to stop strangers from creating accounts on your server (both ways).
+  Set `ssha.open-registration=false` to stop strangers from creating accounts on your server (both ways). Either
+  way, one IP address can create at most 10 accounts an hour.
 - **Another computer:** run `ssha-cli --account <id>` (or set `$SSHA_ACCOUNT`) there. The phone's start page shows a
   *New computer* card with its host name, IP address and a code that is also printed in the terminal; **Accept**
   gives that computer its own token. Unanswered requests fail after 2 minutes (`ssha.join-timeout`), and an account
-  has at most 5 requests waiting at once.
+  has at most 5 requests waiting at once and 10 in 10 minutes (one IP address: 20 in 10 minutes, whatever the
+  account).
 - **Computers** on the phone lists every computer with access and when it was last used; **Remove** revokes its token.
 - The account id is the account's name on the phone (it's what the passkey is registered under). Knowing it only lets
   someone *ask* to join; the phone still has to accept.
@@ -117,9 +119,14 @@ The phone holds the SSH keys; the computer only gets signatures, and each one ne
 3. Run `ssha-cli agent` and use the socket it prints, e.g. `export SSH_AUTH_SOCK=<project>/data/agent.sock`
    (or `IdentityAgent` in `~/.ssh/config`).
 4. When ssh needs a signature, the start page shows a card: key, remote user, host key fingerprint (marked
-   *verified* when OpenSSH's session binding proves it), and the machine asking. **Approve** unlocks the key
+   *verified* when OpenSSH's session binding proves it, with *first login to this host* or how many logins you
+   approved to it before), and the computer asking, by the name it joined with (it can't rename itself). A login
+   through a forwarded agent says so, whichever hop forwarded it. Before signing, the phone decodes what it is
+   about to sign itself and refuses if that doesn't match the card. **Approve** unlocks the key
    with your passkey, signs on the phone and sends only the signature back; **Deny** makes ssh fail.
-   Unanswered requests fail after 60 s (`ssha.sign-timeout`). `ssh-keygen -Y sign` (git commit signing)
+   Unanswered requests fail after 60 s (`ssha.sign-timeout`). A computer can have 2 requests waiting and send 20 a
+   minute, an account 5 waiting; a request that arrives while another is waiting is marked, so a stranger's request
+   timed to match yours stands out. `ssh-keygen -Y sign` (git commit signing)
    works the same way and shows as a *Signature* with its namespace.
 
 Things to know:
@@ -132,7 +139,8 @@ Things to know:
 - **Notifications:** tap *Turn on notifications* on the start page to be notified of every sign and join request,
   even with the page closed (see *Phone app* below). Answering still happens on the start page.
 - The phone runs JavaScript served by this server, so whoever controls the server could serve code that
-  copies a key while it's unlocked. Fine for a self-hosted server; a hardware key is stronger.
+  copies a key while it's unlocked. Fine for a self-hosted server; a hardware key is stronger. No other code runs
+  there: htmx is served from the jar (webjars), and a Content-Security-Policy allows only the server's own scripts.
 
 ## Phone app
 
@@ -156,8 +164,12 @@ app*). It opens full screen, from its own icon.
 
 - **Phone:** passkeys only (Spring Security WebAuthn); each account is a user named by its id. Sessions last
   30 days of inactivity but live in memory, so a server restart means one passkey tap.
-- **First passkey / new device / recovery:** run `ssha-cli enroll`, scan the QR code, press
-  *Continue*, then *Add* on the passkeys page. Links are single use and expire after 10 minutes.
+- **First passkey / new device:** run `ssha-cli enroll`, scan the QR code, press *Continue*, then *Add* on the
+  passkeys page. Links are single use and expire after 10 minutes. A link signs in to the whole account, so once
+  the account has a passkey, `enroll` first shows a *Sign-in link* card on the phone (with a code that the terminal
+  prints too) and only gets the link once you accept it there. A computer's token alone can't take over the account.
+- **Lost every passkey:** there is no recovery; create a new account and new SSH keys (the old keys only ever
+  lived on the lost phone).
 - **CLI:** a bearer token per computer, from `$SSHA_TOKEN` or `data/token` (`~/.config/ssha/token` outside a
   checkout). The server stores only SHA-256
   hashes of tokens. To rotate one: remove the computer on the phone, delete `data/token` and join again.
@@ -185,15 +197,17 @@ app*). It opens full screen, from its own icon.
 | GET    | `/clients`      | phone   | Computers with access to the account; remove them             |
 | POST   | `/join/{id}/accept` | phone | Accept a computer's join request; 204                        |
 | POST   | `/join/{id}/deny` | phone | 204                                                           |
+| POST   | `/enroll/{id}/accept` | phone | Accept a computer's sign-in link request; 204              |
+| POST   | `/enroll/{id}/deny` | phone | 204                                                         |
 | POST   | `/api/accounts` | CLI (no token) | `{client}` → new account `{account, token}`            |
 | POST   | `/api/accounts/{id}/clients` | CLI (no token) | `{client, code}`; waits for the phone: 200 `{account, token}`, 403, 404, 408, 429 |
 | GET    | `/api/account`  | CLI     | `{account}` the token belongs to                              |
-| POST   | `/api/enroll`   | CLI     | Returns a one-time sign-in link `{url, expiresAt}`            |
+| POST   | `/api/enroll`   | CLI     | `{code}`; a one-time sign-in link `{url, expiresAt}`; once the account has a passkey, waits for the phone: 200, 403, 408, 429 |
 | GET    | `/keys`         | phone   | List / create / delete SSH keys                               |
 | POST   | `/sign/{id}/approve` | phone | Form field `signature` (raw signature, base64url); 204     |
 | POST   | `/sign/{id}/deny` | phone | 204                                                           |
 | GET    | `/api/keys`     | CLI     | Public keys for the agent                                     |
-| POST   | `/api/sign`     | CLI     | Waits for the phone: 200 `{signature}`, 403 denied, 408 timeout |
+| POST   | `/api/sign`     | CLI     | Waits for the phone: 200 `{signature}`, 403 denied, 408 timeout, 429 too many |
 
 All other `/api` endpoints need `Authorization: Bearer <token>` and act on that token's account; everything else
 needs a signed-in session and acts on its account.

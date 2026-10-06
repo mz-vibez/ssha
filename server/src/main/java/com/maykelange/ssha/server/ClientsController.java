@@ -13,17 +13,23 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-/** The computers allowed to use this account: answering join requests, listing and revoking them. */
+/**
+ * The computers allowed to use this account: answering their join and sign-in link requests, listing
+ * and revoking them.
+ */
 @Controller
 public class ClientsController {
 
     private final Accounts accounts;
     private final JoinService joins;
+    private final EnrollService enrolls;
     private final DownloadsController downloads;
 
-    public ClientsController(Accounts accounts, JoinService joins, DownloadsController downloads) {
+    public ClientsController(Accounts accounts, JoinService joins, EnrollService enrolls,
+                             DownloadsController downloads) {
         this.accounts = accounts;
         this.joins = joins;
+        this.enrolls = enrolls;
         this.downloads = downloads;
     }
 
@@ -59,6 +65,26 @@ public class ClientsController {
     public void deny(@PathVariable String id, Principal principal) {
         try {
             joins.deny(principal.getName(), id);
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @PostMapping("/enroll/{id}/accept")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void acceptEnroll(@PathVariable String id, Principal principal) {
+        try {
+            enrolls.accept(principal.getName(), id);
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @PostMapping("/enroll/{id}/deny")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void denyEnroll(@PathVariable String id, Principal principal) {
+        try {
+            enrolls.deny(principal.getName(), id);
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }

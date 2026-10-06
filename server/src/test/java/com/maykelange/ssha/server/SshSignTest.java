@@ -53,6 +53,10 @@ class SshSignTest {
     JdbcTemplate jdbc;
     @Autowired
     Accounts accounts;
+    @Autowired
+    RateLimits limits;
+    @Autowired
+    org.thymeleaf.TemplateEngine templates;
 
     String account;
     String bearer;
@@ -63,6 +67,7 @@ class SshSignTest {
     @BeforeEach
     void createKeyOnThePhone() throws Exception {
         jdbc.update("delete from ssh_keys");
+        limits.clear();
         Accounts.Enrolled enrolled = accounts.create("laptop");
         account = enrolled.accountId();
         bearer = "Bearer " + enrolled.token();
@@ -231,6 +236,14 @@ class SshSignTest {
         byte[] data = userAuth(sessionId, "git", publicBlob, hostBlob);
 
         startSign(data, new SignService.Binding(hostBlob, sessionId, hostSignature, false));
+        // The claims the phone checks against the payload before signing (ssh.js checkCard).
+        org.thymeleaf.context.Context ctx = new org.thymeleaf.context.Context();
+        ctx.setVariable("p", onlyPending());
+        assertThat(templates.process("fragments/sign", java.util.Set.of("sign"), ctx))
+                .contains("data-kind=\"SSH login\"", "data-user=\"git\"",
+                        "data-host-key=\"" + SshWire.fingerprint(hostBlob) + "\"", "data-warning=\"false\"",
+                        "first login to this host")
+                .doesNotContain("data-namespace");
         SignDetails details = onlyPending().details();
         assertThat(details.kind()).isEqualTo("SSH login");
         assertThat(details.user()).isEqualTo("git");
@@ -245,6 +258,83 @@ class SshSignTest {
                 new SignService.Binding(hostBlob, sessionId, hostSignature, false));
         assertThat(onlyPending().details().hostVerified()).isFalse();
         assertThat(onlyPending().details().warning()).contains("does not match");
+        signs.deny(account, onlyPending().id());
+    }
+
+    @Test
+    void phoneShowsTheComputerAsItJoinedNotAsItSaysItIs() throws Exception {
+        startSign(new byte[] {1}, null);
+        assertThat(onlyPending().client().name()).isEqualTo("laptop");
+        assertThat(onlyPending().client().accountId()).isEqualTo(account);
+        signs.deny(account, onlyPending().id());
+    }
+
+    @Test
+    void pendingRequestsPerComputerAreLimitedAndConcurrentOnesFlagged() throws Exception {
+        startSign(new byte[] {1}, null);
+        startSign(new byte[] {2}, null);
+        assertThat(signs.pending(account)).extracting(SignService.Pending::concurrent).containsExactly(false, true);
+        mvc.perform(post("/api/sign").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+                        .content(signJson(publicBlob, new byte[] {3}, null)))
+                .andExpect(status().isTooManyRequests());
+
+        // Another computer of the account may still ask, up to the account's limit.
+        String other = "Bearer " + accounts.addClient(account, "desktop").token();
+        for (int i = SignService.MAX_PENDING_PER_CLIENT; i < SignService.MAX_PENDING_PER_ACCOUNT; i++) {
+            Accounts.Enrolled extra = accounts.addClient(account, "extra" + i);
+            mvc.perform(post("/api/sign").header("Authorization", "Bearer " + extra.token())
+                            .contentType(MediaType.APPLICATION_JSON).content(signJson(publicBlob, new byte[] {4}, null)))
+                    .andExpect(request().asyncStarted());
+        }
+        mvc.perform(post("/api/sign").header("Authorization", other).contentType(MediaType.APPLICATION_JSON)
+                        .content(signJson(publicBlob, new byte[] {5}, null)))
+                .andExpect(status().isTooManyRequests());
+        signs.pending(account).forEach(p -> signs.deny(account, p.id()));
+    }
+
+    @Test
+    void computerCantKeepThePhoneBuzzing() throws Exception {
+        for (int i = 0; i < 20; i++) {
+            startSign(new byte[] {(byte) i}, null);
+            signs.deny(account, onlyPending().id());
+        }
+        mvc.perform(post("/api/sign").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+                        .content(signJson(publicBlob, new byte[] {1}, null)))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void approvedLoginsToAVerifiedHostAreRemembered() throws Exception {
+        KeyPairGenerator ec = KeyPairGenerator.getInstance("EC");
+        ec.initialize(new ECGenParameterSpec("secp256r1"));
+        KeyPair host = ec.generateKeyPair();
+        byte[] hostBlob = ecdsaBlob((ECPublicKey) host.getPublic());
+        byte[] sessionId = new byte[32];
+        Arrays.fill(sessionId, (byte) 9);
+        SignService.Binding binding = new SignService.Binding(hostBlob, sessionId, new SshWire.Writer()
+                .string("ecdsa-sha2-nistp256")
+                .string(ecdsaSignature(sign(host.getPrivate(), "SHA256withECDSAinP1363Format", sessionId)))
+                .toByteArray(), false);
+        byte[] data = userAuth(sessionId, "git", publicBlob, hostBlob);
+
+        MvcResult first = startSign(data, binding);
+        assertThat(onlyPending().newHost()).isTrue();
+        assertThat(onlyPending().host()).isNull();
+        mvc.perform(post("/sign/" + onlyPending().id() + "/approve").with(user(account)).with(csrf())
+                        .param("signature", B64URL.encodeToString(sign(phoneKey.getPrivate(), "Ed25519", data))))
+                .andExpect(status().isNoContent());
+        mvc.perform(asyncDispatch(first)).andExpect(status().isOk());
+
+        startSign(data, binding);
+        assertThat(onlyPending().newHost()).isFalse();
+        assertThat(onlyPending().host().logins()).isEqualTo(1);
+        signs.deny(account, onlyPending().id());
+
+        // Denied and unverified logins teach nothing.
+        startSign(userAuth(new byte[32], "git", publicBlob, hostBlob), binding);
+        assertThat(onlyPending().details().hostVerified()).isFalse();
+        assertThat(onlyPending().host()).isNull();
+        assertThat(onlyPending().newHost()).isFalse();
         signs.deny(account, onlyPending().id());
     }
 
@@ -290,7 +380,8 @@ class SshSignTest {
         String bindingJson = binding == null ? "null" : "{\"hostKey\":\"%s\",\"sessionId\":\"%s\",\"signature\":\"%s\",\"forwarded\":%s}"
                 .formatted(b64.encodeToString(binding.hostKey()), b64.encodeToString(binding.sessionId()),
                         b64.encodeToString(binding.signature()), binding.forwarded());
-        return "{\"publicKey\":\"%s\",\"data\":\"%s\",\"flags\":0,\"client\":\"laptop\",\"binding\":%s}"
+        // Older CLIs still send a "client" name: accepted, and ignored.
+        return "{\"publicKey\":\"%s\",\"data\":\"%s\",\"flags\":0,\"client\":\"spoofed\",\"binding\":%s}"
                 .formatted(b64.encodeToString(key), b64.encodeToString(data), bindingJson);
     }
 

@@ -30,7 +30,7 @@
     });
     document.addEventListener("htmx:sseBeforeMessage", (e) => {
         // A reconnect resends every pending request; skip the ones already shown.
-        const card = /^<section[^>]*\sid="((?:sign|join)-[^"]+)"/.exec(e.detail.data);
+        const card = /^<section[^>]*\sid="((?:sign|join|enroll)-[^"]+)"/.exec(e.detail.data);
         if (card && document.getElementById(card[1])) e.preventDefault();
     });
 })();

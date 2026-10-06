@@ -43,6 +43,14 @@ import jakarta.servlet.http.HttpServletRequest;
 @Configuration
 public class SecurityConfig {
 
+    /**
+     * Only this server's own scripts, styles and connections: the start page decrypts SSH keys, so no
+     * inline script, eval or third-party code may run there.
+     */
+    static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; "
+            + "img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; "
+            + "base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
     @Bean
     @Order(1)
     SecurityFilterChain apiChain(HttpSecurity http, Accounts accounts) throws Exception {
@@ -69,7 +77,9 @@ public class SecurityConfig {
                         .requestMatchers("/login", "/login/ott", "/app.css", "/webauthn.js", "/favicon.ico", "/error")
                         .permitAll()
                         // The PWA's files: the browser fetches them without (or after the end of) a session.
-                        .requestMatchers("/manifest.webmanifest", "/sw.js", "/push.js", "/icon-*.png").permitAll()
+                        .requestMatchers("/manifest.webmanifest", "/sw.js", "/push.js", "/confirm.js", "/icon-*.png")
+                        .permitAll()
+                        .requestMatchers("/webjars/**").permitAll()
                         // The CLI: fetched with curl on computers that have no session.
                         .requestMatchers("/download/*").permitAll()
                         .requestMatchers(HttpMethod.POST, "/signup").permitAll()
@@ -90,6 +100,7 @@ public class SecurityConfig {
                         .showDefaultSubmitPage(false)
                         .successHandler(new SimpleUrlAuthenticationSuccessHandler("/passkeys")))
                 .logout(l -> l.logoutSuccessUrl("/login?logout"))
+                .headers(h -> h.contentSecurityPolicy(c -> c.policyDirectives(CONTENT_SECURITY_POLICY)))
                 .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint()));
         return http.build();
     }

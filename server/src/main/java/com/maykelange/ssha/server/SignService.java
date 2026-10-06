@@ -27,6 +27,11 @@ public class SignService {
     /** Most SSH sign payloads are a few hundred bytes; SSHSIG signs a hash, not the message. */
     public static final int MAX_DATA_LENGTH = 16 * 1024;
 
+    /** Most requests one computer may have waiting: ssh asks one at a time per connection. */
+    static final int MAX_PENDING_PER_CLIENT = 2;
+    /** Most requests one account may have waiting, from all its computers. */
+    static final int MAX_PENDING_PER_ACCOUNT = 5;
+
     private static final SecureRandom RANDOM = new SecureRandom();
 
     /**
@@ -36,9 +41,20 @@ public class SignService {
     public record Binding(byte[] hostKey, byte[] sessionId, byte[] signature, boolean forwarded) {
     }
 
-    /** @param algorithm SSH signature algorithm, e.g. ssh-ed25519 or rsa-sha2-512 */
-    public record Pending(String id, SshKey key, byte[] data, String algorithm, SignDetails details, String client,
-                          Instant requestedAt, CompletableFuture<byte[]> result) {
+    /**
+     * @param algorithm  SSH signature algorithm, e.g. ssh-ed25519 or rsa-sha2-512
+     * @param client     the computer asking, as stored when it joined
+     * @param host       earlier logins to this (verified) host; null if none, or not a verified login
+     * @param concurrent whether other requests of the account were waiting when this one came in
+     */
+    public record Pending(String id, SshKey key, byte[] data, String algorithm, SignDetails details,
+                          Accounts.Client client, KnownHosts.Seen host, boolean concurrent, Instant requestedAt,
+                          CompletableFuture<byte[]> result) {
+
+        /** A verified login to a host the account never approved a login to. */
+        public boolean newHost() {
+            return details.hostVerified() && host == null;
+        }
 
         /** The bytes to sign, for the phone. */
         public String payload() {
@@ -67,12 +83,17 @@ public class SignService {
     private final TemplateEngine templates;
     private final SshaProperties props;
     private final PushService push;
+    private final KnownHosts knownHosts;
+    private final RateLimits limits;
 
-    public SignService(StreamHub streams, TemplateEngine templates, SshaProperties props, PushService push) {
+    public SignService(StreamHub streams, TemplateEngine templates, SshaProperties props, PushService push,
+                       KnownHosts knownHosts, RateLimits limits) {
         this.streams = streams;
         this.templates = templates;
         this.props = props;
         this.push = push;
+        this.knownHosts = knownHosts;
+        this.limits = limits;
         // A page that (re)connects gets every request of its account that is still waiting.
         streams.onConnect((account, emitter) -> pending(account).forEach(p -> streams.send(emitter, "sign", render(p))));
     }
@@ -81,15 +102,34 @@ public class SignService {
      * Shows the request on the phone. The future completes with an SSH signature blob, or fails with
      * {@link DeniedException}, a {@link java.util.concurrent.TimeoutException}, or a cancellation.
      *
-     * @param flags ssh-agent sign flags (they pick the RSA hash)
+     * @param flags  ssh-agent sign flags (they pick the RSA hash)
+     * @param client the computer asking; it must belong to the key's account
      * @throws IllegalArgumentException for signatures the phone won't make (SHA-1 RSA)
+     * @throws IllegalStateException    if the computer or account has too many requests waiting, or the
+     *                                  computer sent too many lately
      */
-    public CompletableFuture<byte[]> request(SshKey key, byte[] data, int flags, Binding binding, String client) {
+    public synchronized CompletableFuture<byte[]> request(SshKey key, byte[] data, int flags, Binding binding,
+                                                          Accounts.Client client) {
+        if (!client.accountId().equals(key.accountId())) {
+            throw new IllegalArgumentException("the key belongs to another account");
+        }
         String algorithm = SshWire.signatureAlgorithm(key.publicKey(), flags);
+        List<Pending> waiting = pending(key.accountId());
+        if (waiting.size() >= MAX_PENDING_PER_ACCOUNT
+                || waiting.stream().filter(w -> w.client().id().equals(client.id())).count() >= MAX_PENDING_PER_CLIENT) {
+            throw new IllegalStateException("too many sign requests waiting on the phone");
+        }
+        if (!limits.signsPerClient.tryAcquire(client.id())) {
+            throw new IllegalStateException("too many sign requests from this computer; wait a minute");
+        }
+        SignDetails details = SignDetails.describe(key.publicKey(), data, binding);
+        KnownHosts.Seen host = details.hostVerified()
+                ? knownHosts.find(key.accountId(), details.hostKey()).orElse(null)
+                : null;
         byte[] id = new byte[16];
         RANDOM.nextBytes(id);
         Pending p = new Pending(Base64.getUrlEncoder().withoutPadding().encodeToString(id), key, data.clone(),
-                algorithm, SignDetails.describe(key.publicKey(), data, binding), client, Instant.now(), new CompletableFuture<>());
+                algorithm, details, client, host, !waiting.isEmpty(), Instant.now(), new CompletableFuture<>());
         pending.put(p.id(), p);
         p.result().orTimeout(props.signTimeout().toMillis(), TimeUnit.MILLISECONDS).whenComplete((sig, err) -> {
             pending.remove(p.id());
@@ -107,7 +147,9 @@ public class SignService {
         if (!SshWire.verify(p.key().publicKey(), p.data(), blob)) {
             throw new IllegalArgumentException("the signature does not match the key");
         }
-        p.result().complete(blob);
+        if (p.result().complete(blob) && p.details().hostVerified()) {
+            knownHosts.login(accountId, p.details().hostKey());
+        }
     }
 
     public void deny(String accountId, String id) {
@@ -132,15 +174,21 @@ public class SignService {
 
     private PushService.Notification notification(Pending p) {
         SignDetails d = p.details();
-        StringBuilder body = new StringBuilder(p.client()).append(" wants to use key ").append(p.key().label());
+        StringBuilder body = new StringBuilder(p.client().name()).append(" wants to use key ").append(p.key().label());
         if (d.user() != null) {
             body.append(" as ").append(d.user());
+        }
+        if (p.newHost()) {
+            body.append(" on a host you never logged in to");
         }
         if (d.namespace() != null) {
             body.append(" (").append(d.namespace()).append(')');
         }
         if (d.warning() != null) {
             body.append(". ").append(d.warning());
+        }
+        if (p.concurrent()) {
+            body.append(". Other requests are waiting too: check that each one is yours.");
         }
         return new PushService.Notification(d.kind(), body.toString(), "sign-" + p.id(), props.signTimeout());
     }

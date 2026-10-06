@@ -72,3 +72,15 @@ create table if not exists push_subscriptions
     created    timestamp     not null,
     primary key (endpoint)
 );
+
+-- Host keys of SSH logins the account approved, by verified fingerprint, so the phone can tell a host
+-- it has logged in to before from a new one.
+create table if not exists known_hosts
+(
+    account_id  varchar(64)  not null,
+    fingerprint varchar(100) not null,
+    first_seen  timestamp    not null,
+    last_seen   timestamp    not null,
+    logins      int          not null,
+    primary key (account_id, fingerprint)
+);

@@ -2,7 +2,9 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <section th:fragment="sign" class="sign" th:id="|sign-${p.id}|"
-         th:attr="data-request=${p.id},data-key=${p.key.id},data-payload=${p.payload()},data-hash=${p.hash()}">
+         th:attr="data-request=${p.id},data-key=${p.key.id},data-payload=${p.payload()},data-hash=${p.hash()},
+                  data-kind=${p.details.kind},data-user=${p.details.user},data-namespace=${p.details.namespace},
+                  data-host-key=${p.details.hostKey},data-warning=${p.details.warning != null}">
     <div class="sign-title" th:classappend="${p.details.warning} ? 'warn'">
         <strong th:text="${p.details.kind}">SSH login</strong>
         <time th:datetime="${p.requestedAt}"
@@ -19,16 +21,22 @@
             <dt>Host</dt>
             <dd><code th:text="${p.details.hostKey}">SHA256:…</code>
                 <span th:class="${p.details.hostVerified} ? 'ok' : 'bad'"
-                      th:text="${p.details.hostVerified} ? 'verified' : 'unverified'">verified</span></dd>
+                      th:text="${p.details.hostVerified} ? 'verified' : 'unverified'">verified</span>
+                <span th:if="${p.newHost()}" class="bad">· first login to this host</span>
+                <span th:if="${p.host}" class="hint"
+                      th:text="|· ${p.host.logins} earlier login${p.host.logins == 1 ? '' : 's'} since ${#temporals.format(p.host.firstSeen.atZone(T(java.time.ZoneId).systemDefault()), 'yyyy-MM-dd')}|">· 3 earlier logins since 2026-10-01</span></dd>
         </th:block>
         <th:block th:if="${p.details.namespace}">
             <dt>Purpose</dt>
             <dd th:text="${p.details.namespace}">git</dd>
         </th:block>
         <dt>From</dt>
-        <dd><span th:text="${p.client}">laptop</span><th:block th:if="${p.details.forwarded}"> (forwarded agent)</th:block></dd>
+        <dd><span th:text="${p.client.name}">laptop</span><th:block th:if="${p.details.forwarded}"> (forwarded agent)</th:block></dd>
     </dl>
     <p class="warning" th:if="${p.details.warning}" th:text="${p.details.warning}">Warning</p>
+    <p class="warning" th:if="${p.concurrent}">
+        Another request was already waiting when this one came in. Approve only the ones you started.
+    </p>
     <p class="error" data-sign-error hidden></p>
     <div class="actions">
         <button type="button" class="deny" th:attr="hx-post=|/sign/${p.id}/deny|" hx-swap="none">Deny</button>

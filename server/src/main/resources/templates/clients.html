@@ -19,7 +19,7 @@
                 </div>
             </div>
             <form method="post" th:action="@{/clients/{id}/delete(id=${c.id})}"
-                  onsubmit="return confirm('Remove this computer? Its ssha-cli stops working.')">
+                  data-confirm="Remove this computer? Its ssha-cli stops working.">
                 <button type="submit" class="danger">Remove</button>
             </form>
         </li>

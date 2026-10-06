@@ -68,6 +68,12 @@ public class Accounts {
         return accountId != null && !jdbc.queryForList("select id from accounts where id = ?", String.class, accountId).isEmpty();
     }
 
+    /** Whether the account has a passkey, i.e. a phone that can approve things. */
+    public boolean hasPasskey(String accountId) {
+        return jdbc.queryForObject("select count(*) from user_credentials c join user_entities u "
+                + "on c.user_entity_user_id = u.id where u.name = ?", Integer.class, accountId) > 0;
+    }
+
     public Enrolled addClient(String accountId, String name) {
         String token = randomId(32);
         return new Enrolled(accountId, insertClient(accountId, name, token), token);

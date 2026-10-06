@@ -56,13 +56,13 @@ class JsonTest {
     @Test
     void writesSignRequest() {
         String withoutBinding = Json.signRequest(
-                new SshaCli.SignRequest(new byte[] {1, 2, 3}, new byte[] {(byte) 0xfb, (byte) 0xff}, 4, "laptop", null));
+                new SshaCli.SignRequest(new byte[] {1, 2, 3}, new byte[] {(byte) 0xfb, (byte) 0xff}, 4, null));
         assertThat(withoutBinding).isEqualTo(
-                "{\"publicKey\":\"AQID\",\"data\":\"+/8=\",\"flags\":4,\"client\":\"laptop\",\"binding\":null}");
+                "{\"publicKey\":\"AQID\",\"data\":\"+/8=\",\"flags\":4,\"binding\":null}");
 
-        String withBinding = Json.signRequest(new SshaCli.SignRequest(new byte[] {1}, new byte[] {2}, 0, "a\"b",
+        String withBinding = Json.signRequest(new SshaCli.SignRequest(new byte[] {1}, new byte[] {2}, 0,
                 new SshAgent.Binding(new byte[] {3}, new byte[] {4}, new byte[] {5}, true)));
-        assertThat(withBinding).isEqualTo("{\"publicKey\":\"AQ==\",\"data\":\"Ag==\",\"flags\":0,\"client\":\"a\\\"b\","
+        assertThat(withBinding).isEqualTo("{\"publicKey\":\"AQ==\",\"data\":\"Ag==\",\"flags\":0,"
                 + "\"binding\":{\"hostKey\":\"Aw==\",\"sessionId\":\"BA==\",\"signature\":\"BQ==\",\"forwarded\":true}}");
     }
 

@@ -65,7 +65,7 @@ public final class SshaCli {
     record AgentKey(String id, String label, byte[] publicKey, String authorizedKey) {
     }
 
-    record SignRequest(byte[] publicKey, byte[] data, int flags, String client, SshAgent.Binding binding) {
+    record SignRequest(byte[] publicKey, byte[] data, int flags, SshAgent.Binding binding) {
     }
 
     record SignResponse(byte[] signature) {
@@ -240,9 +240,14 @@ public final class SshaCli {
         }
     }
 
+    /** Shown in the terminal and on the phone, so the user can tell their own request from someone else's. */
+    private static String newCode() {
+        return "%03d %03d".formatted(RANDOM.nextInt(1000), RANDOM.nextInt(1000));
+    }
+
     /** Asks to add this computer to an existing account and waits for the phone to accept. */
     private boolean join(String account) {
-        String code = "%03d %03d".formatted(RANDOM.nextInt(1000), RANDOM.nextInt(1000));
+        String code = newCode();
         System.out.println("Asking to join account " + account + ".");
         System.out.println("Accept the request on that account's phone; it shows the code " + code + ".");
         try {
@@ -324,16 +329,37 @@ public final class SshaCli {
         }
     }
 
+    /**
+     * Gets a sign-in link. Once the account has a passkey, the server first asks its phone, which must
+     * accept the request showing the same code as this terminal.
+     */
     private boolean enroll() {
-        HttpRequest request = request("api/enroll").POST(HttpRequest.BodyPublishers.noBody()).build();
+        String code = newCode();
+        HttpRequest request = request("api/enroll")
+                .timeout(Duration.ofMinutes(5))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(Json.strings(Map.of("code", code))))
+                .build();
+        System.out.println("If this account already has a passkey, accept the request on its phone; it shows the code "
+                + code + ".");
         try {
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 401) {
-                throw new UnauthorizedException();
-            }
-            if (response.statusCode() != 200) {
-                System.err.println("enroll failed: HTTP " + response.statusCode() + " " + response.body());
-                return false;
+            switch (response.statusCode()) {
+                case 200 -> {
+                }
+                case 401 -> throw new UnauthorizedException();
+                case 403 -> {
+                    System.err.println("Denied on the phone.");
+                    return false;
+                }
+                case 408 -> {
+                    System.err.println("Not answered on the phone in time; run the command again.");
+                    return false;
+                }
+                default -> {
+                    System.err.println("enroll failed: HTTP " + response.statusCode() + " " + response.body());
+                    return false;
+                }
             }
             EnrollLink link = Json.enrollLink(response.body());
             System.out.println("Scan with your phone to sign in once and add a passkey:");
@@ -358,7 +384,6 @@ public final class SshaCli {
     private final Map<String, String> keyLabels = new ConcurrentHashMap<>();
 
     private void agent() throws IOException {
-        String client = hostName();
         SshAgent agent = new SshAgent(new SshAgent.Phone() {
             @Override
             public List<SshAgent.Identity> identities() throws IOException, InterruptedException {
@@ -370,7 +395,7 @@ public final class SshaCli {
             @Override
             public byte[] sign(byte[] publicKey, byte[] data, int flags, SshAgent.Binding binding)
                     throws IOException, InterruptedException {
-                return requestSignature(new SignRequest(publicKey, data, flags, client, binding));
+                return requestSignature(new SignRequest(publicKey, data, flags, binding));
             }
         });
         agent.serve(AGENT_SOCKET, () -> {
@@ -413,6 +438,7 @@ public final class SshaCli {
             case 403 -> log("denied on the phone");
             case 404 -> log("the server doesn't know this key");
             case 408 -> log("not answered on the phone in time");
+            case 429 -> log("refused: " + response.body());
             default -> log("sign request failed: HTTP " + response.statusCode() + " " + response.body());
         }
         return null;

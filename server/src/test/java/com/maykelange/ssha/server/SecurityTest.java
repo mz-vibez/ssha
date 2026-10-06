@@ -3,9 +3,11 @@ package com.maykelange.ssha.server;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
@@ -19,6 +21,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.jayway.jsonpath.JsonPath;
@@ -37,12 +40,15 @@ class SecurityTest {
     MockMvc mvc;
     @Autowired
     Accounts accounts;
+    @Autowired
+    RateLimits limits;
 
     String account;
     String bearer;
 
     @BeforeEach
     void createAccount() {
+        limits.clear();
         Accounts.Enrolled enrolled = accounts.create("laptop");
         account = enrolled.accountId();
         bearer = "Bearer " + enrolled.token();
@@ -99,6 +105,19 @@ class SecurityTest {
     }
 
     @Test
+    void pagesOnlyRunTheServersOwnScripts() throws Exception {
+        mvc.perform(get("/").with(user(account)))
+                .andExpect(header().string("Content-Security-Policy", SecurityConfig.CONTENT_SECURITY_POLICY))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/webjars/htmx.org/2.0.4/dist/htmx.min.js")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("unpkg"))));
+        mvc.perform(get("/login")).andExpect(header().string("Content-Security-Policy",
+                org.hamcrest.Matchers.containsString("script-src 'self';")));
+        mvc.perform(get("/webjars/htmx.org/2.0.4/dist/htmx.min.js")).andExpect(status().isOk());
+        mvc.perform(get("/webjars/htmx-ext-sse/2.2.2/sse.js")).andExpect(status().isOk());
+        mvc.perform(get("/confirm.js")).andExpect(status().isOk());
+    }
+
+    @Test
     void postingRequiresCsrfToken() throws Exception {
         mvc.perform(post("/sign/x/deny").with(user(account)).header("HX-Request", "true"))
                 .andExpect(status().isForbidden());
@@ -151,7 +170,10 @@ class SecurityTest {
 
     @Test
     void enrollLinkSignsInOnceAndLandsOnPasskeys() throws Exception {
-        String body = mvc.perform(post("/api/enroll").header("Authorization", bearer))
+        MvcResult enroll = mvc.perform(post("/api/enroll").header("Authorization", bearer))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        String body = mvc.perform(asyncDispatch(enroll))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String url = JsonPath.read(body, "$.url");

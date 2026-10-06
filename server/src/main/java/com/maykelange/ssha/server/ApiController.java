@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.ott.GenerateOneTimeTokenRequest;
 import org.springframework.security.authentication.ott.OneTimeToken;
 import org.springframework.security.authentication.ott.OneTimeTokenService;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.async.DeferredResult;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -44,15 +46,20 @@ public class ApiController {
     private final JoinService joins;
     private final SshKeys sshKeys;
     private final SignService signs;
+    private final EnrollService enrolls;
+    private final RateLimits limits;
 
     public ApiController(OneTimeTokenService oneTimeTokens, SshaProperties props, Accounts accounts,
-                         JoinService joins, SshKeys sshKeys, SignService signs) {
+                         JoinService joins, SshKeys sshKeys, SignService signs, EnrollService enrolls,
+                         RateLimits limits) {
         this.oneTimeTokens = oneTimeTokens;
         this.props = props;
         this.accounts = accounts;
         this.joins = joins;
         this.sshKeys = sshKeys;
         this.signs = signs;
+        this.enrolls = enrolls;
+        this.limits = limits;
     }
 
     /** @param client a name for the computer, e.g. its host name */
@@ -65,9 +72,12 @@ public class ApiController {
 
     /** A new account, with the calling computer as its first client. */
     @PostMapping("/accounts")
-    public Enrolled createAccount(@RequestBody NewClient request) {
+    public Enrolled createAccount(@RequestBody NewClient request, HttpServletRequest http) {
         if (!props.openRegistration()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this server doesn't accept new accounts");
+        }
+        if (!limits.accountsPerAddress.tryAcquire(http.getRemoteAddr())) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many new accounts from this address");
         }
         Accounts.Enrolled enrolled = accounts.create(clientName(request.client()));
         return new Enrolled(enrolled.accountId(), enrolled.token());
@@ -84,9 +94,13 @@ public class ApiController {
     @PostMapping("/accounts/{account}/clients")
     public DeferredResult<ResponseEntity<?>> join(@PathVariable String account, @RequestBody JoinRequest request,
                                                   HttpServletRequest http) {
-        String code = request.code() == null ? "" : request.code().strip();
-        if (code.length() > 20 || code.chars().anyMatch(Character::isISOControl)) {
-            throw new IllegalArgumentException("invalid code");
+        String code = code(request.code());
+        // Per address first, so guessing at account ids is limited too.
+        if (!limits.joinsPerAddress.tryAcquire(http.getRemoteAddr())) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many join requests from this address");
+        }
+        if (accounts.exists(account) && !limits.joinsPerAccount.tryAcquire(account)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many join requests for this account");
         }
         CompletableFuture<Accounts.Enrolled> result;
         try {
@@ -120,13 +134,50 @@ public class ApiController {
     public record EnrollLink(String url, Instant expiresAt) {
     }
 
-    /** A single-use sign-in link for the phone, used to register a (first or additional) passkey. */
+    /** @param code shown next to the request on the phone, so it can be matched to the terminal */
+    public record EnrollRequest(String code) {
+    }
+
+    /**
+     * A single-use sign-in link for the phone, used to register a (first or additional) passkey. The
+     * link gives full control of the account, so once the account has a passkey the phone must accept
+     * the request first: this then waits like a join, 200 with the link, 403, 408 or 429.
+     */
     @PostMapping("/enroll")
-    public EnrollLink enroll(Principal principal) {
-        OneTimeToken token = oneTimeTokens.generate(
-                new GenerateOneTimeTokenRequest(principal.getName(), ENROLL_LINK_VALIDITY));
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/login/ott")
+    public DeferredResult<ResponseEntity<?>> enroll(@RequestBody(required = false) EnrollRequest request,
+                                                    @AuthenticationPrincipal ClientPrincipal caller) {
+        Accounts.Client client = caller.client();
+        // The link has to be built now: the async completion runs without this request's context.
+        String base = ServletUriComponentsBuilder.fromCurrentContextPath().path("/login/ott").toUriString();
+        DeferredResult<ResponseEntity<?>> response = new DeferredResult<>();
+        if (!accounts.hasPasskey(client.accountId())) {
+            response.setResult(ResponseEntity.ok(enrollLink(client.accountId(), base)));
+            return response;
+        }
+        String code = code(request == null ? null : request.code());
+        if (!limits.enrollsPerAccount.tryAcquire(client.accountId())) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many sign-in link requests");
+        }
+        CompletableFuture<Void> result;
+        try {
+            result = enrolls.request(client, code);
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+        }
+        response.onError(e -> result.cancel(false));
+        result.whenComplete((ok, error) -> response.setResult(switch (error) {
+            case null -> ResponseEntity.ok(enrollLink(client.accountId(), base));
+            case SignService.DeniedException e -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
+            case TimeoutException e -> ResponseEntity.status(HttpStatus.REQUEST_TIMEOUT).body("not answered on the phone in time");
+            case CancellationException e -> ResponseEntity.status(HttpStatus.GONE).build();
+            default -> ResponseEntity.internalServerError().build();
+        }));
+        return response;
+    }
+
+    private EnrollLink enrollLink(String accountId, String base) {
+        OneTimeToken token = oneTimeTokens.generate(new GenerateOneTimeTokenRequest(accountId, ENROLL_LINK_VALIDITY));
+        String url = UriComponentsBuilder.fromUriString(base)
                 .queryParam("token", token.getTokenValue())
                 .toUriString();
         return new EnrollLink(url, token.getExpiresAt());
@@ -146,10 +197,9 @@ public class ApiController {
     /**
      * @param publicKey SSH public key blob of the key to sign with
      * @param data      the bytes ssh wants signed
-     * @param binding   the agent connection's last session binding, if ssh sent one
-     * @param client    shown on the phone, e.g. the host name the agent runs on
+     * @param binding   the agent connection's session binding, if ssh sent one
      */
-    public record SignRequest(byte[] publicKey, byte[] data, int flags, String client, SignService.Binding binding) {
+    public record SignRequest(byte[] publicKey, byte[] data, int flags, SignService.Binding binding) {
     }
 
     public record SignResponse(byte[] signature) {
@@ -157,20 +207,26 @@ public class ApiController {
 
     /**
      * Waits until the request is approved (200 with an SSH signature blob), denied (403) or not
-     * answered in time (408) on the phone.
+     * answered in time (408) on the phone; 429 if this computer asks too much. The phone shows the
+     * computer's name as stored when it joined, whatever the request says.
      */
     @PostMapping("/sign")
-    public DeferredResult<ResponseEntity<?>> sign(@RequestBody SignRequest request, Principal principal) {
+    public DeferredResult<ResponseEntity<?>> sign(@RequestBody SignRequest request,
+                                                  @AuthenticationPrincipal ClientPrincipal caller) {
         if (request.publicKey() == null || request.data() == null) {
             throw new IllegalArgumentException("publicKey and data are required");
         }
         if (request.data().length > SignService.MAX_DATA_LENGTH) {
             throw new IllegalArgumentException("data too long");
         }
-        SshKey key = sshKeys.findByPublicKey(principal.getName(), request.publicKey())
+        SshKey key = sshKeys.findByPublicKey(caller.getName(), request.publicKey())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown key"));
-        CompletableFuture<byte[]> result = signs.request(key, request.data(), request.flags(), request.binding(),
-                clientName(request.client()));
+        CompletableFuture<byte[]> result;
+        try {
+            result = signs.request(key, request.data(), request.flags(), request.binding(), caller.client());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+        }
 
         DeferredResult<ResponseEntity<?>> response = new DeferredResult<>();
         // The agent gave up (ssh was interrupted): take the request off the phone.
@@ -183,6 +239,14 @@ public class ApiController {
             default -> ResponseEntity.internalServerError().build();
         }));
         return response;
+    }
+
+    private static String code(String value) {
+        String code = value == null ? "" : value.strip();
+        if (code.length() > 20 || code.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("invalid code");
+        }
+        return code;
     }
 
     private static String clientName(String name) {

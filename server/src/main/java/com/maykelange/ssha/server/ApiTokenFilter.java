@@ -16,8 +16,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Authenticates {@code Authorization: Bearer <token>} requests from the CLI. The principal's name is
- * the account id, like a signed-in phone's, so both sides see the same account.
+ * Authenticates {@code Authorization: Bearer <token>} requests from the CLI. The principal is a
+ * {@link ClientPrincipal}: its name is the account id, and it knows which computer is calling.
  */
 class ApiTokenFilter extends OncePerRequestFilter {
 
@@ -38,7 +38,7 @@ class ApiTokenFilter extends OncePerRequestFilter {
             accounts.authenticate(header.substring(PREFIX.length()).strip()).ifPresent(client -> {
                 SecurityContext context = contexts.createEmptyContext();
                 context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
-                        client.accountId(), null, List.of(new SimpleGrantedAuthority("ROLE_CLI"))));
+                        new ClientPrincipal(client), null, List.of(new SimpleGrantedAuthority("ROLE_CLI"))));
                 contexts.setContext(context);
             });
         }

@@ -123,11 +123,15 @@
         await navigator.storage?.persist?.();
     }
 
-    /** @param hash "SHA-256" or "SHA-512" for RSA keys, as the server says ssh asked for */
-    async function sign(record, data, hash) {
+    /**
+     * @param hash    "SHA-256" or "SHA-512" for RSA keys, as the server says ssh asked for
+     * @param checked settles once the request is checked; the key is only decrypted if it fulfils
+     */
+    async function sign(record, data, hash, checked) {
         const algorithm = record.type === "ssh-rsa" ? { name: "RSASSA-PKCS1-v1_5", hash } : { name: "Ed25519" };
         if (record.type === "ssh-rsa" && !hash) throw new Error("the request doesn't say which RSA hash to use");
         const { secret } = await passkeySecret(record.salt, record.credentialId);
+        await checked;
         const pkcs8 = new Uint8Array(await crypto.subtle.decrypt(
             { name: "AES-GCM", iv: record.iv, additionalData: record.publicKey },
             await wrappingKey(secret, record.salt), record.ciphertext));
@@ -136,13 +140,111 @@
         return crypto.subtle.sign(algorithm, key, data);
     }
 
+    // --- what is being signed --------------------------------------------------------------------
+
+    /**
+     * What the payload is, decoded here rather than taken from the server: the same cases as the
+     * server's SignDetails. Returns { kind, user?, userKey?, hostKey?, namespace? }.
+     */
+    function describe(data) {
+        const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        let pos = 0;
+        const need = (n) => { if (n < 0 || pos + n > data.length) throw new Error("truncated"); };
+        const byte = () => { need(1); return data[pos++]; };
+        const string = () => {
+            need(4);
+            const n = view.getUint32(pos);
+            pos += 4;
+            need(n);
+            const s = data.subarray(pos, pos + n);
+            pos += n;
+            return s;
+        };
+        const utf8 = () => new TextDecoder("utf-8", { fatal: true }).decode(string());
+        const magic = new TextEncoder().encode("SSHSIG");
+        if (data.length > magic.length && magic.every((b, i) => data[i] === b)) {
+            try {
+                pos = magic.length;
+                const namespace = utf8();
+                string(); // reserved
+                utf8(); // hash algorithm
+                string(); // message hash
+                if (pos === data.length) return { kind: "Signature", namespace };
+            } catch (e) {
+                // fall through
+            }
+        }
+        try {
+            pos = 0;
+            string(); // session id
+            if (byte() === 50) { // SSH_MSG_USERAUTH_REQUEST
+                const user = utf8();
+                utf8(); // service
+                const method = utf8();
+                const hostbound = method === "publickey-hostbound-v00@openssh.com";
+                if ((hostbound || method === "publickey") && byte() !== 0) {
+                    utf8(); // algorithm
+                    const userKey = string();
+                    const hostKey = hostbound ? string() : null;
+                    if (pos === data.length) return { kind: "SSH login", user, userKey, hostKey };
+                }
+            }
+        } catch (e) {
+            // fall through
+        }
+        return { kind: "Unknown data" };
+    }
+
+    async function fingerprint(keyBlob) {
+        const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", keyBlob));
+        return "SHA256:" + btoa(String.fromCharCode(...hash)).replace(/=+$/, "");
+    }
+
+    /** The key's SSH public key blob (records from before RSA support hold the raw Ed25519 key). */
+    function publicBlob(record) {
+        const key = new Uint8Array(record.publicKey);
+        if (record.type) return key;
+        const ssh = sshString("ssh-ed25519");
+        const blob = new Uint8Array(ssh.length + 4 + key.length);
+        blob.set(ssh);
+        blob.set(sshString(key), ssh.length);
+        return blob;
+    }
+
+    const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+    /**
+     * Refuses to sign when the card says something the payload doesn't: the card is rendered by the
+     * server, the payload is what actually gets signed.
+     */
+    async function checkCard(card, data, record) {
+        const actual = describe(data);
+        const claimed = card.dataset;
+        const mismatch = (what) => new Error(`the request doesn't match what is shown (${what}); not signed`);
+        if (actual.kind !== claimed.kind) throw mismatch("kind");
+        if (actual.kind === "Signature" && actual.namespace !== claimed.namespace) throw mismatch("purpose");
+        if (actual.kind === "SSH login") {
+            if (actual.user !== claimed.user) throw mismatch("user");
+            if (actual.hostKey && await fingerprint(actual.hostKey) !== claimed.hostKey) throw mismatch("host");
+            // A login naming another key than the one signing is shown with a warning; it must be.
+            if (!sameBytes(actual.userKey, publicBlob(record)) && claimed.warning !== "true") {
+                throw mismatch("key");
+            }
+        }
+    }
+
     // --- sign requests (start page) --------------------------------------------------------------
 
     async function approve(card) {
         // Created in another tab since this page loaded? (Safari may then refuse the prompt; tap again.)
         const record = keys.get(card.dataset.key) ?? await reload().then(() => keys.get(card.dataset.key));
         if (!record) throw new Error("this key isn't stored in this browser");
-        const signature = await sign(record, b64url.decode(card.dataset.payload), card.dataset.hash);
+        const data = b64url.decode(card.dataset.payload);
+        // Checked while the passkey prompt is up (Safari needs the prompt straight from the tap), and
+        // awaited before the key is decrypted.
+        const checked = checkCard(card, data, record);
+        checked.catch(() => {}); // reported by sign(), not as an unhandled rejection
+        const signature = await sign(record, data, card.dataset.hash, checked);
         const response = await fetch(`/sign/${card.dataset.request}/approve`, {
             method: "POST",
             headers: csrfHeaders(),

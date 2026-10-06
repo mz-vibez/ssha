@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.Base64;
 
 import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,17 @@ class AccountsTest {
     SignService signs;
     @Autowired
     Accounts accounts;
+    @Autowired
+    EnrollService enrolls;
+    @Autowired
+    RateLimits limits;
+    @Autowired
+    JdbcTemplate jdbc;
+
+    @BeforeEach
+    void resetLimits() {
+        limits.clear();
+    }
 
     @Test
     void cliWithoutTokenCreatesAnAccount() throws Exception {
@@ -157,6 +169,93 @@ class AccountsTest {
     }
 
     @Test
+    void newAccountsPerAddressAreLimited() throws Exception {
+        for (int i = 0; i < 6; i++) {
+            register("laptop");
+        }
+        for (int i = 0; i < 4; i++) {
+            mvc.perform(post("/signup").with(csrf())).andExpect(status().isFound());
+        }
+        // The CLI and the phone share the limit.
+        mvc.perform(post("/signup").with(csrf())).andExpect(status().isTooManyRequests());
+        mvc.perform(post("/api/accounts").contentType(MediaType.APPLICATION_JSON).content("{\"client\":\"x\"}"))
+                .andExpect(status().isTooManyRequests());
+        // Another address isn't affected.
+        mvc.perform(post("/api/accounts").contentType(MediaType.APPLICATION_JSON).content("{\"client\":\"x\"}")
+                        .with(r -> {
+                            r.setRemoteAddr("192.0.2.7");
+                            return r;
+                        }))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void joinRequestsPerAccountAreLimited() throws Exception {
+        Enrolled first = register("laptop");
+        for (int i = 0; i < 10; i++) {
+            startJoin(first.account(), "spam");
+            joins.deny(first.account(), onlyJoin(first.account()).id());
+        }
+        mvc.perform(post("/api/accounts/" + first.account() + "/clients").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"client\":\"spam\",\"code\":\"1\"}"))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    // --- sign-in links -----------------------------------------------------------------------
+
+    @Test
+    void firstSignInLinkNeedsNoApproval() throws Exception {
+        Enrolled first = register("laptop");
+        MvcResult result = mvc.perform(post("/api/enroll").header("Authorization", "Bearer " + first.token()))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mvc.perform(asyncDispatch(result))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.url").value(org.hamcrest.Matchers.startsWith("http://localhost/login/ott?token=")));
+        assertThat(enrolls.pending(first.account())).isEmpty();
+    }
+
+    @Test
+    void signInLinkNeedsThePhoneOnceTheAccountHasAPasskey() throws Exception {
+        Enrolled first = register("laptop");
+        addPasskey(first.account());
+        MvcResult waiting = startEnroll(first.token());
+        EnrollService.Pending pending = onlyEnroll(first.account());
+        assertThat(pending.client().name()).isEqualTo("laptop");
+        assertThat(pending.code()).isEqualTo("123 456");
+
+        // One at a time.
+        mvc.perform(post("/api/enroll").header("Authorization", "Bearer " + first.token())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"1\"}"))
+                .andExpect(status().isTooManyRequests());
+        // Another account's phone can't answer it, nor can a computer.
+        Enrolled other = register("intruder");
+        mvc.perform(post("/enroll/" + pending.id() + "/accept").with(user(other.account())).with(csrf()))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/enroll/" + pending.id() + "/accept").header("Authorization", "Bearer " + first.token()))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(post("/enroll/" + pending.id() + "/accept").with(user(first.account())).with(csrf()))
+                .andExpect(status().isNoContent());
+        mvc.perform(asyncDispatch(waiting))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.url").value(org.hamcrest.Matchers.startsWith("http://localhost/login/ott?token=")));
+        assertThat(enrolls.pending(first.account())).isEmpty();
+    }
+
+    @Test
+    void deniedSignInLinkRequestGetsNoLink() throws Exception {
+        Enrolled first = register("laptop");
+        addPasskey(first.account());
+        MvcResult waiting = startEnroll(first.token());
+        mvc.perform(post("/enroll/" + onlyEnroll(first.account()).id() + "/deny").with(user(first.account())).with(csrf()))
+                .andExpect(status().isNoContent());
+        mvc.perform(asyncDispatch(waiting))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("token"))));
+    }
+
+    @Test
     void accountsDontSeeEachOthersKeysOrRequests() throws Exception {
         Enrolled alice = register("alice-laptop");
         Enrolled bob = register("bob-laptop");
@@ -245,6 +344,27 @@ class AccountsTest {
                         .content("{\"client\":\"" + client + "\",\"code\":\"123 456\"}"))
                 .andExpect(request().asyncStarted())
                 .andReturn();
+    }
+
+    private MvcResult startEnroll(String token) throws Exception {
+        return mvc.perform(post("/api/enroll").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123 456\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+    }
+
+    private EnrollService.Pending onlyEnroll(String account) {
+        assertThat(enrolls.pending(account)).hasSize(1);
+        return enrolls.pending(account).getFirst();
+    }
+
+    /** What registering a passkey on the phone leaves in the database. */
+    private void addPasskey(String account) {
+        jdbc.update("insert into user_entities (id, name, display_name) values (?, ?, ?)", "h-" + account, account, account);
+        jdbc.update("insert into user_credentials (credential_id, user_entity_user_id, public_key, signature_count, "
+                + "uv_initialized, backup_eligible, backup_state, label, created) "
+                + "values (?, ?, X'00', 0, true, false, false, 'phone', current_timestamp)", "c-" + account, "h-" + account);
+        assertThat(accounts.hasPasskey(account)).isTrue();
     }
 
     private JoinService.Pending onlyJoin(String account) {

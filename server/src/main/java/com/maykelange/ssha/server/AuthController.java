@@ -40,16 +40,18 @@ public class AuthController {
     private final Accounts accounts;
     private final UserDetailsService users;
     private final SshaProperties props;
+    private final RateLimits limits;
     private final SecurityContextHolderStrategy contexts = SecurityContextHolder.getContextHolderStrategy();
     private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();
 
     public AuthController(PublicKeyCredentialUserEntityRepository userEntities, UserCredentialRepository credentials,
-                          Accounts accounts, UserDetailsService users, SshaProperties props) {
+                          Accounts accounts, UserDetailsService users, SshaProperties props, RateLimits limits) {
         this.userEntities = userEntities;
         this.credentials = credentials;
         this.accounts = accounts;
         this.users = users;
         this.props = props;
+        this.limits = limits;
     }
 
     @GetMapping("/login")
@@ -67,6 +69,9 @@ public class AuthController {
     public String signup(HttpServletRequest request, HttpServletResponse response) {
         if (!props.openRegistration()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this server doesn't accept new accounts");
+        }
+        if (!limits.accountsPerAddress.tryAcquire(request.getRemoteAddr())) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many new accounts from this address");
         }
         UserDetails user = users.loadUserByUsername(accounts.create());
         SecurityContext context = contexts.createEmptyContext();
