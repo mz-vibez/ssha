@@ -8,7 +8,11 @@
     <p><a href="/">← Sign requests</a></p>
     <h1>Passkeys</h1>
 
-    <p class="notice" th:if="${passkeys.isEmpty()}">
+    <p class="notice" th:if="${param.new != null}">
+        Your account is ready. Add a passkey now: without one, you can't get back in once this session ends.
+        Then add a computer from <a href="/clients">Computers</a>.
+    </p>
+    <p class="notice" th:if="${passkeys.isEmpty() and param.new == null}">
         You have no passkeys yet. Add one so you can sign in on this device without a link.
     </p>
     <ul class="passkeys" th:unless="${passkeys.isEmpty()}">

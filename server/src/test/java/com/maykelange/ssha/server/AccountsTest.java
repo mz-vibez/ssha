@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -27,6 +28,7 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -67,6 +69,37 @@ class AccountsTest {
         mvc.perform(get("/clients").with(user(account)))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("laptop")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("ssha-cli --account " + account)));
+    }
+
+    @Test
+    void phoneCreatesAnAccountAndIsSignedIn() throws Exception {
+        mvc.perform(get("/login"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Create an account")));
+        mvc.perform(post("/signup")).andExpect(status().isForbidden());
+
+        MvcResult signup = mvc.perform(post("/signup").with(csrf()))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("/passkeys?new"))
+                .andReturn();
+        MockHttpSession session = (MockHttpSession) signup.getRequest().getSession();
+        mvc.perform(get("/passkeys?new").session(session))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Your account is ready")));
+        mvc.perform(post("/webauthn/register/options").with(csrf()).session(session)).andExpect(status().isOk());
+
+        String page = mvc.perform(get("/clients").session(session))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String account = page.replaceAll("(?s).*ssha-cli --account ([A-Za-z0-9_-]{22}).*", "$1");
+        assertThat(accounts.exists(account)).isTrue();
+        assertThat(accounts.clients(account)).isEmpty();
+
+        // A computer can then join it.
+        MvcResult waiting = startJoin(account, "laptop");
+        mvc.perform(post("/join/" + onlyJoin(account).id() + "/accept").session(session).with(csrf()))
+                .andExpect(status().isNoContent());
+        mvc.perform(asyncDispatch(waiting)).andExpect(status().isOk());
+        assertThat(accounts.clients(account)).hasSize(1);
     }
 
     @Test

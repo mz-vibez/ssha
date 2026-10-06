@@ -49,7 +49,9 @@ The CLI targets the public URL by default; override with `--url http://localhost
 - **New account:** run `ssha-cli` on a computer that has no token yet. The server creates an account with a random
   id (128 bits, e.g. `l5Gn7tgVI4tpy-ufe7RiZA`) and a token for this computer, saved to `data/token` (mode 600).
   The CLI prints the id and a QR code for adding the account's first passkey on the phone.
-  Set `ssha.open-registration=false` to stop strangers from creating accounts on your server.
+  Or start on the phone: **Create an account** on the sign-in page creates one, signs the browser in and opens the
+  passkeys page to add its passkey; then add computers to it as below.
+  Set `ssha.open-registration=false` to stop strangers from creating accounts on your server (both ways).
 - **Another computer:** run `ssha-cli --account <id>` (or set `$SSHA_ACCOUNT`) there. The phone's start page shows a
   *New computer* card with its host name, IP address and a code that is also printed in the terminal; **Accept**
   gives that computer its own token. Unanswered requests fail after 2 minutes (`ssha.join-timeout`), and an account
@@ -123,6 +125,7 @@ Things to know:
 | GET    | `/passkeys`     | phone   | List / add / delete passkeys                                  |
 | GET    | `/`             | phone   | Start page: sign requests waiting for approval                |
 | GET    | `/stream`       | phone   | SSE of rendered sign request cards; pending ones on connect   |
+| POST   | `/signup`       | phone   | Create an account and sign in to it; → `/passkeys?new`         |
 | GET    | `/clients`      | phone   | Computers with access to the account; remove them             |
 | POST   | `/join/{id}/accept` | phone | Accept a computer's join request; 204                        |
 | POST   | `/join/{id}/deny` | phone | 204                                                           |

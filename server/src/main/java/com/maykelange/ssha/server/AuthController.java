@@ -6,7 +6,15 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.context.SecurityContextHolderStrategy;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.CredentialRecord;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
@@ -20,22 +28,56 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Login page, one-time-link landing page and passkey management. */
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+/** Login page, account creation, one-time-link landing page and passkey management. */
 @Controller
 public class AuthController {
 
     private final PublicKeyCredentialUserEntityRepository userEntities;
     private final UserCredentialRepository credentials;
+    private final Accounts accounts;
+    private final UserDetailsService users;
+    private final SshaProperties props;
+    private final SecurityContextHolderStrategy contexts = SecurityContextHolder.getContextHolderStrategy();
+    private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();
 
-    public AuthController(PublicKeyCredentialUserEntityRepository userEntities, UserCredentialRepository credentials) {
+    public AuthController(PublicKeyCredentialUserEntityRepository userEntities, UserCredentialRepository credentials,
+                          Accounts accounts, UserDetailsService users, SshaProperties props) {
         this.userEntities = userEntities;
         this.credentials = credentials;
+        this.accounts = accounts;
+        this.users = users;
+        this.props = props;
     }
 
     @GetMapping("/login")
-    public String login(Authentication authentication) {
+    public String login(Authentication authentication, Model model) {
         boolean signedIn = authentication != null && !(authentication instanceof AnonymousAuthenticationToken);
+        model.addAttribute("openRegistration", props.openRegistration());
         return signedIn ? "redirect:/" : "login";
+    }
+
+    /**
+     * Creates an account from the phone and signs this browser in to it, then sends it to add the
+     * account's first passkey. Computers join it later with {@code ssha-cli --account <id>}.
+     */
+    @PostMapping("/signup")
+    public String signup(HttpServletRequest request, HttpServletResponse response) {
+        if (!props.openRegistration()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this server doesn't accept new accounts");
+        }
+        UserDetails user = users.loadUserByUsername(accounts.create());
+        SecurityContext context = contexts.createEmptyContext();
+        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(user, null, user.getAuthorities()));
+        contexts.setContext(context);
+        // A new session id, as after any sign-in, so a planted session can't ride along.
+        if (request.getSession(false) != null) {
+            request.changeSessionId();
+        }
+        contextRepository.saveContext(context, request, response);
+        return "redirect:/passkeys?new";
     }
 
     /**

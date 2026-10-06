@@ -68,6 +68,7 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/login", "/login/ott", "/app.css", "/webauthn.js", "/favicon.ico", "/error")
                         .permitAll()
+                        .requestMatchers(HttpMethod.POST, "/signup").permitAll()
                         .anyRequest().authenticated())
                 .webAuthn(w -> w
                         .rpName("ssha")

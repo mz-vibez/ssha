@@ -13,6 +13,14 @@
     <button type="button" class="primary" data-passkey-login>Sign in with passkey</button>
 
     <p class="hint">No passkey on this device yet? Run <code>ssha-cli enroll</code> on your computer and scan the QR code.</p>
+
+    <th:block th:if="${openRegistration}">
+        <h2>New here?</h2>
+        <form method="post" th:action="@{/signup}">
+            <button type="submit">Create an account</button>
+        </form>
+        <p class="hint">Creates an account and signs you in; then add a passkey on this phone.</p>
+    </th:block>
 </main>
 <script src="/webauthn.js" defer></script>
 </body>

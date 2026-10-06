@@ -54,9 +54,14 @@ public class Accounts {
     /** A new account with {@code clientName} as its first, already trusted, client. */
     @Transactional
     public Enrolled create(String clientName) {
+        return addClient(create(), clientName);
+    }
+
+    /** A new account without any client, e.g. created on the phone; returns its id. */
+    public String create() {
         String id = randomId(16);
         jdbc.update("insert into accounts (id, created) values (?, ?)", id, Timestamp.from(Instant.now()));
-        return addClient(id, clientName);
+        return id;
     }
 
     public boolean exists(String accountId) {
