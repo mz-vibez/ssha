@@ -40,7 +40,7 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
  *   ssha-cli keys            print the phone's SSH public keys as authorized_keys lines
  * </pre>
  *
- * Each computer has its own API token, from $SSHA_TOKEN or {@code <project>/data/token}. Without one,
+ * Each computer has its own API token, kept in {@code <project>/data/token} (see {@link #dataDir()}). Without one,
  * the CLI first gets one: with {@code --account ID} (or $SSHA_ACCOUNT) by asking to join that account,
  * which must be accepted on the account's phone; otherwise by creating a new account.
  *
@@ -127,10 +127,6 @@ public final class SshaCli {
 
     /** This computer's token, or null if it has none yet. */
     private static String loadToken() throws IOException {
-        String env = System.getenv("SSHA_TOKEN");
-        if (env != null && !env.isBlank()) {
-            return env.strip();
-        }
         if (!Files.exists(TOKEN_FILE)) {
             return null;
         }
@@ -206,7 +202,7 @@ public final class SshaCli {
                 Without an API token, ssha-cli first creates a new account, or with --account ID
                 (or $SSHA_ACCOUNT) asks to join that account, which you accept on its phone.
                 Server URL: --url, $SSHA_URL, or %s
-                API token:  $SSHA_TOKEN, or %s""".formatted(AGENT_SOCKET, DEFAULT_URL, TOKEN_FILE));
+                API token:  %s""".formatted(AGENT_SOCKET, DEFAULT_URL, TOKEN_FILE));
     }
 
     // --- accounts -------------------------------------------------------------------------------

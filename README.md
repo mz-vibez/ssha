@@ -170,9 +170,9 @@ app*). It opens full screen, from its own icon.
   prints too) and only gets the link once you accept it there. A computer's token alone can't take over the account.
 - **Lost every passkey:** there is no recovery; create a new account and new SSH keys (the old keys only ever
   lived on the lost phone).
-- **CLI:** a bearer token per computer, from `$SSHA_TOKEN` or `data/token` (`~/.config/ssha/token` outside a
-  checkout). The server stores only SHA-256
-  hashes of tokens. To rotate one: remove the computer on the phone, delete `data/token` and join again.
+- **CLI:** a bearer token per computer, kept in `data/token` (`~/.config/ssha/token` outside a checkout, mode 600).
+  It is never shown or copied: each computer gets its own by creating or joining an account, so removing one on the
+  phone cuts off only that computer. The server stores only SHA-256 hashes of tokens. To rotate one: remove the computer on the phone, delete `data/token` and join again.
 - **Upgrading from the single-user version:** on the first start, the existing passkeys and SSH keys become one
   account, and the old server-generated `data/token` becomes one of its computers, so nothing needs redoing.
   Run `ssha-cli` to see the new account id.
