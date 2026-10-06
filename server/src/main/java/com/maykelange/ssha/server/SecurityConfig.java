@@ -70,6 +70,8 @@ public class SecurityConfig {
                         .permitAll()
                         // The PWA's files: the browser fetches them without (or after the end of) a session.
                         .requestMatchers("/manifest.webmanifest", "/sw.js", "/push.js", "/icon-*.png").permitAll()
+                        // The CLI: fetched with curl on computers that have no session.
+                        .requestMatchers("/download/*").permitAll()
                         .requestMatchers(HttpMethod.POST, "/signup").permitAll()
                         .anyRequest().authenticated())
                 .webAuthn(w -> w

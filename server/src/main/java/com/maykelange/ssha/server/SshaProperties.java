@@ -18,6 +18,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param vapidKeyFile     the server's Web Push key pair; generated on first start (blank: a new one per start)
  * @param vapidSubject     contact for the push services ({@code mailto:} or {@code https:} URL)
  * @param pushHosts        push services the server will send to (host names, subdomains included)
+ * @param downloadsDir     where the native CLI offered for download ({@code ssha-cli}) is
  */
 @ConfigurationProperties("ssha")
 public record SshaProperties(String rpId, Set<String> allowedOrigins,
@@ -26,5 +27,6 @@ public record SshaProperties(String rpId, Set<String> allowedOrigins,
                              @DefaultValue("120s") Duration joinTimeout,
                              Path vapidKeyFile, String vapidSubject,
                              @DefaultValue({"fcm.googleapis.com", "push.services.mozilla.com", "push.apple.com",
-                                     "notify.windows.com"}) List<String> pushHosts) {
+                                     "notify.windows.com"}) List<String> pushHosts,
+                             Path downloadsDir) {
 }

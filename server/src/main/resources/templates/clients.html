@@ -25,10 +25,31 @@
         </li>
     </ul>
 
-    <h2>Add a computer</h2>
-    <p class="hint">Run this on the other computer, then accept its request on the start page:</p>
-    <textarea class="pubkey" readonly rows="2" aria-label="Command"
-              th:text="|ssha-cli --account ${account}|">ssha-cli --account …</textarea>
+    <h2 id="add">Add a computer</h2>
+    <th:block th:unless="${download}">
+        <p class="hint">Run this on the other computer, then accept its request on the start page:</p>
+        <textarea class="pubkey" readonly rows="2" aria-label="Command"
+                  th:text="|ssha-cli --account ${account}|">ssha-cli --account …</textarea>
+    </th:block>
+    <th:block th:if="${download}" th:with="d=${download}">
+        <p class="hint">1. Get the agent on that computer:</p>
+        <ul class="downloads">
+            <li>
+                <a th:href="@{/download/{name}(name=${d.name})}" th:text="${d.name}" download>ssha-cli</a>
+                <span class="hint" th:text="|${d.description}, ${d.sizeText()}|">Linux x86-64, no Java needed, 34 MB</span>
+            </li>
+        </ul>
+        <p class="hint">or from its terminal:</p>
+        <textarea class="pubkey" readonly rows="2" aria-label="Download command"
+                  th:text="|curl -fLO ${server}/download/${d.name} && chmod +x ${d.name}|">curl -fLO …</textarea>
+        <p class="hint">2. Run this there, then accept its request on the start page:</p>
+        <textarea class="pubkey" readonly rows="2" aria-label="Command"
+                  th:text="|./${d.name} --account ${account}|">./ssha-cli --account …</textarea>
+        <p class="hint">
+            Then <code th:text="|./${d.name} agent|">./ssha-cli agent</code> runs the SSH agent. Its token is kept
+            in <code>~/.config/ssha</code>.
+        </p>
+    </th:block>
 </main>
 </body>
 </html>

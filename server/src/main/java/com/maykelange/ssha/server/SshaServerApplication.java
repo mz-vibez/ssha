@@ -18,7 +18,9 @@ public class SshaServerApplication {
         if (System.getProperty("ssha.project-dir") == null) {
             System.setProperty("ssha.project-dir", projectDir().toString());
         }
-        SpringApplication.run(SshaServerApplication.class, args);
+        SpringApplication application = new SpringApplication(SshaServerApplication.class);
+        application.addListeners(new DataDirCheck());
+        application.run(args);
     }
 
     /**

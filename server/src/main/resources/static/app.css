@@ -191,3 +191,7 @@ textarea.pubkey {
 .push[hidden], .push button[hidden] { display: none; }
 .push span { flex: 1; }
 .push button { font-size: 14px; padding: 8px 12px; white-space: nowrap; }
+
+/* CLI downloads on the Computers page */
+.downloads { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+.downloads a { font-weight: 600; }

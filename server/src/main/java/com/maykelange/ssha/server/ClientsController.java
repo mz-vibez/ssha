@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /** The computers allowed to use this account: answering join requests, listing and revoking them. */
 @Controller
@@ -18,15 +19,19 @@ public class ClientsController {
 
     private final Accounts accounts;
     private final JoinService joins;
+    private final DownloadsController downloads;
 
-    public ClientsController(Accounts accounts, JoinService joins) {
+    public ClientsController(Accounts accounts, JoinService joins, DownloadsController downloads) {
         this.accounts = accounts;
         this.joins = joins;
+        this.downloads = downloads;
     }
 
     @GetMapping("/clients")
     public String clients(Principal principal, Model model) {
         model.addAttribute("account", principal.getName());
+        model.addAttribute("download", downloads.download().orElse(null));
+        model.addAttribute("server", ServletUriComponentsBuilder.fromCurrentContextPath().toUriString());
         model.addAttribute("clients", accounts.clients(principal.getName()));
         return "clients";
     }

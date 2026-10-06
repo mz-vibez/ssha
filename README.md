@@ -27,8 +27,8 @@ fails fast with a clear message on an older JDK.
 
 It needs gcc and the zlib development files (`sudo apt install zlib1g-dev` on Debian/Ubuntu). The CLI
 uses only Jackson's streaming API (`Json`), so there is no reflection to configure. Like the jar, the
-executable finds the project's `data/` folder from its own location; a copy elsewhere needs
-`$SSHA_TOKEN`, and its agent socket goes to `./data/agent.sock`.
+executable finds the project's `data/` folder from its own location; a copy elsewhere (e.g. downloaded from the
+server) keeps its token and agent socket in `~/.config/ssha` (`$XDG_CONFIG_HOME/ssha`).
 
 ## Run the server
 
@@ -41,23 +41,33 @@ stock `eclipse-temurin:25-jre` image, with the jar and the data in folders on th
 forwards to it ([`deploy/Caddyfile`](deploy/Caddyfile)).
 
 1. On the host, create a folder with subfolders `app` and `data`.
-2. Build with `mvn package` and copy `server/target/ssha-server.jar` to `app/`.
+2. Build with `mvn package` and copy `server/target/ssha-server.jar` to `app/`. To offer the CLI for download on the
+   Computers page, also build it with `mise run native` and copy `cli/target/ssha-cli` there.
 3. Copy `deploy/docker-compose.yml` into the folder and edit the lines marked `EDIT`: the user that owns `data/`,
    the time zone and the domain.
 4. `docker compose up -d` in the folder. The server listens on `127.0.0.1:9091` on the host.
 5. Add the [`deploy/Caddyfile`](deploy/Caddyfile) site block to Caddy and reload it.
 
-Updating: copy the new jar over `app/ssha-server.jar` and `docker compose restart`. Schema changes apply themselves
+Updating: copy the new jars into `app/` and `docker compose restart`. Schema changes apply themselves
 on start.
 
 Moving an existing server: stop it, copy its `data/` folder (`ssha.mv.db`, `vapid`, and `token` if present) into
 the new folder's `data/`, make it owned by the user from the compose file, then start the container. Keep the same
 domain, or the passkeys stop working.
 
+If the server stops at startup with "The data folder /data is not writable" (or, from older versions, H2's "The
+database is read only"), the container's `user:` can't write `data/`: `sudo chown -R <uid>:<gid> data` with the
+compose file's `user:` values, or set `user:` to the folder's owner.
+
 Back up `data/`: it holds the accounts, passkeys, computers' token hashes, the public keys and the push key. The
 private SSH keys are never there; they only live on the phones.
 
 ## Use the CLI
+
+On a computer without a checkout, get the native CLI from the phone's **Computers** page, which links to it and
+shows the commands to fetch and run it, e.g. `curl -fLO https://<server>/download/ssha-cli && chmod +x ssha-cli`.
+The server offers `ssha-cli` from `ssha.downloads-dir` (`cli/target` of the checkout by default) when it is there.
+A downloaded CLI keeps its token in `~/.config/ssha`.
 
     java -jar cli/target/ssha-cli.jar                 # first run: create an account (see Accounts below)
     java -jar cli/target/ssha-cli.jar --account ID    # first run on another computer: join account ID
@@ -148,13 +158,14 @@ app*). It opens full screen, from its own icon.
   30 days of inactivity but live in memory, so a server restart means one passkey tap.
 - **First passkey / new device / recovery:** run `ssha-cli enroll`, scan the QR code, press
   *Continue*, then *Add* on the passkeys page. Links are single use and expire after 10 minutes.
-- **CLI:** a bearer token per computer, from `$SSHA_TOKEN` or `data/token`. The server stores only SHA-256
+- **CLI:** a bearer token per computer, from `$SSHA_TOKEN` or `data/token` (`~/.config/ssha/token` outside a
+  checkout). The server stores only SHA-256
   hashes of tokens. To rotate one: remove the computer on the phone, delete `data/token` and join again.
 - **Upgrading from the single-user version:** on the first start, the existing passkeys and SSH keys become one
   account, and the old server-generated `data/token` becomes one of its computers, so nothing needs redoing.
   Run `ssha-cli` to see the new account id.
 - Accounts, tokens, passkeys and public keys are stored in an H2 database in `data/`.
-- Nothing is stored outside the project folder. Both jars locate the project folder from their own
+- Run from a checkout, nothing is stored outside the project folder: both jars locate it from their own
   location, so they can be started from any directory. `data/` is git-ignored — it holds secrets.
 - Passkeys are bound to `ssha.rp-id` (`ssha.apps.maykelange.com`); changing the domain invalidates them.
 
@@ -168,6 +179,7 @@ app*). It opens full screen, from its own icon.
 | GET    | `/`             | phone   | Start page: sign requests waiting for approval                |
 | GET    | `/stream`       | phone   | SSE of rendered sign request cards; pending ones on connect   |
 | POST   | `/signup`       | phone   | Create an account and sign in to it; → `/passkeys?new`         |
+| GET    | `/download/ssha-cli` | anyone | The native CLI, if built                                  |
 | POST   | `/push/subscribe` | phone | `PushSubscription.toJSON()`; 204                             |
 | POST   | `/push/unsubscribe` | phone | `{endpoint}`; 204                                            |
 | GET    | `/clients`      | phone   | Computers with access to the account; remove them             |

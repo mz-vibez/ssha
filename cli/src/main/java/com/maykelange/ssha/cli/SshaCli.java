@@ -53,8 +53,8 @@ public final class SshaCli {
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
     private static final DateTimeFormatter TIME_SECONDS = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
 
-    private static final Path TOKEN_FILE = projectDir().resolve("data").resolve("token");
-    private static final Path AGENT_SOCKET = projectDir().resolve("data").resolve("agent.sock");
+    private static final Path TOKEN_FILE = dataDir().resolve("token");
+    private static final Path AGENT_SOCKET = dataDir().resolve("agent.sock");
 
     record EnrollLink(String url, Instant expiresAt) {
     }
@@ -89,9 +89,28 @@ public final class SshaCli {
     }
 
     /**
+     * Where the token and agent socket live: {@code <project>/data} when running from a checkout of the
+     * project, otherwise (e.g. a CLI downloaded from the server) {@code $XDG_CONFIG_HOME/ssha}, by
+     * default {@code ~/.config/ssha}.
+     */
+    static Path dataDir() {
+        Path project = projectDir();
+        if (project != null) {
+            return project.resolve("data");
+        }
+        String config = System.getenv("XDG_CONFIG_HOME");
+        // $HOME first, like other command-line tools; Java's user.home ignores it.
+        String home = System.getenv("HOME");
+        Path base = config != null && !config.isBlank()
+                ? Path.of(config)
+                : Path.of(home != null && !home.isBlank() ? home : System.getProperty("user.home"), ".config");
+        return base.resolve("ssha");
+    }
+
+    /**
      * The project folder (the one holding {@code server/} and {@code cli/}), found by walking up from
      * the running jar or classes directory, or from the executable when running as a native image;
-     * falls back to the working directory.
+     * null when the CLI doesn't run from a checkout.
      */
     static Path projectDir() {
         String classPath = System.getProperty("java.class.path", "").split(java.io.File.pathSeparator)[0];
@@ -103,7 +122,7 @@ public final class SshaCli {
                 return dir;
             }
         }
-        return Path.of("").toAbsolutePath();
+        return null;
     }
 
     /** This computer's token, or null if it has none yet. */
@@ -120,7 +139,8 @@ public final class SshaCli {
     }
 
     private static void saveToken(String token) throws IOException {
-        Files.createDirectories(TOKEN_FILE.getParent());
+        Files.createDirectories(TOKEN_FILE.getParent(),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
         Path temp = Files.createTempFile(TOKEN_FILE.getParent(), "token", ".tmp",
                 PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
         Files.writeString(temp, token + "\n");
