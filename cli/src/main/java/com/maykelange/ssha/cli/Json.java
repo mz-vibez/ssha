@@ -38,6 +38,30 @@ final class Json {
         });
     }
 
+    static SshaCli.Enrolled enrolled(String json) throws IOException {
+        return read(json, p -> {
+            Map<String, String> f = object(p);
+            return new SshaCli.Enrolled(required(f, "account"), required(f, "token"));
+        });
+    }
+
+    static String account(String json) throws IOException {
+        return read(json, p -> required(object(p), "account"));
+    }
+
+    /** A flat object of string fields, e.g. {@code {"client": "laptop"}}. */
+    static String strings(Map<String, String> fields) {
+        StringWriter out = new StringWriter();
+        try (JsonGenerator g = FACTORY.createGenerator(ObjectWriteContext.empty(), out)) {
+            g.writeStartObject();
+            for (Map.Entry<String, String> field : fields.entrySet()) {
+                g.writeName(field.getKey()).writeString(field.getValue());
+            }
+            g.writeEndObject();
+        }
+        return out.toString();
+    }
+
     static List<SshaCli.AgentKey> agentKeys(String json) throws IOException {
         return read(json, p -> {
             expect(p, JsonToken.START_ARRAY);

@@ -1,5 +1,6 @@
 package com.maykelange.ssha.server;
 
+import java.security.Principal;
 import java.util.Base64;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -35,8 +36,8 @@ public class KeysController {
     }
 
     @GetMapping("/keys")
-    public String keys(Model model) {
-        model.addAttribute("keys", sshKeys.findAll());
+    public String keys(Principal principal, Model model) {
+        model.addAttribute("keys", sshKeys.findAll(principal.getName()));
         return "keys";
     }
 
@@ -46,7 +47,7 @@ public class KeysController {
 
     @PostMapping(value = "/keys", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
-    public Map<String, String> add(@RequestBody NewKey request) {
+    public Map<String, String> add(@RequestBody NewKey request, Principal principal) {
         String label = request.label() == null ? "" : request.label().strip();
         if (label.isEmpty() || label.length() > 100 || label.chars().anyMatch(Character::isISOControl)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid label");
@@ -59,13 +60,14 @@ public class KeysController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid public key");
         }
         // The same key imported on another device is the same key: keep the existing entry.
-        SshKey key = sshKeys.findByPublicKey(blob).orElseGet(() -> sshKeys.add(label, blob));
+        SshKey key = sshKeys.findByPublicKey(principal.getName(), blob)
+                .orElseGet(() -> sshKeys.add(principal.getName(), label, blob));
         return Map.of("id", key.id(), "authorizedKey", key.authorizedKey());
     }
 
     @PostMapping("/keys/{id}/delete")
-    public String delete(@PathVariable String id) {
-        if (!sshKeys.delete(id)) {
+    public String delete(@PathVariable String id, Principal principal) {
+        if (!sshKeys.delete(principal.getName(), id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         }
         return "redirect:/keys";
@@ -80,9 +82,9 @@ public class KeysController {
     /** @param signature the raw signature, base64url */
     @PostMapping("/sign/{id}/approve")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void approve(@PathVariable String id, @RequestParam String signature) {
+    public void approve(@PathVariable String id, @RequestParam String signature, Principal principal) {
         try {
-            signs.approve(id, Base64.getUrlDecoder().decode(signature));
+            signs.approve(principal.getName(), id, Base64.getUrlDecoder().decode(signature));
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         } catch (IllegalArgumentException e) {
@@ -92,9 +94,9 @@ public class KeysController {
 
     @PostMapping("/sign/{id}/deny")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deny(@PathVariable String id) {
+    public void deny(@PathVariable String id, Principal principal) {
         try {
-            signs.deny(id);
+            signs.deny(principal.getName(), id);
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }

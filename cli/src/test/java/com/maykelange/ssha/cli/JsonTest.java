@@ -34,6 +34,21 @@ class JsonTest {
     }
 
     @Test
+    void readsAccountAndToken() throws IOException {
+        SshaCli.Enrolled enrolled = Json.enrolled("{\"account\":\"acc\",\"token\":\"tok\"}");
+        assertThat(enrolled.account()).isEqualTo("acc");
+        assertThat(enrolled.token()).isEqualTo("tok");
+        assertThat(Json.account("{\"account\":\"acc\"}")).isEqualTo("acc");
+        assertThatThrownBy(() -> Json.enrolled("{\"account\":\"acc\"}")).isInstanceOf(IOException.class)
+                .hasMessageContaining("token");
+    }
+
+    @Test
+    void writesStringObjects() {
+        assertThat(Json.strings(java.util.Map.of("client", "my \"laptop\""))).isEqualTo("{\"client\":\"my \\\"laptop\\\"\"}");
+    }
+
+    @Test
     void readsSignResponse() throws IOException {
         assertThat(Json.signResponse("{\"signature\":\"AQID\"}").signature()).containsExactly(1, 2, 3);
     }

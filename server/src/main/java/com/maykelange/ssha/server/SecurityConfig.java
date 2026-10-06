@@ -7,6 +7,7 @@ import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.ott.InMemoryOneTimeTokenService;
@@ -15,7 +16,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
@@ -33,7 +34,8 @@ import jakarta.servlet.http.HttpServletRequest;
 /**
  * Two filter chains:
  * <ul>
- * <li>{@code /api/**} — the CLI, stateless, bearer token.</li>
+ * <li>{@code /api/**} — the CLI, stateless, a bearer token per computer. Creating an account and
+ * asking to join one are the only anonymous calls.</li>
  * <li>everything else — the phone, session based. Sign-in is by passkey; a one-time link from
  * {@code ssha-cli enroll} is the bootstrap for registering the first passkey (and recovery).</li>
  * </ul>
@@ -43,13 +45,14 @@ public class SecurityConfig {
 
     @Bean
     @Order(1)
-    SecurityFilterChain apiChain(HttpSecurity http, ApiToken apiToken) throws Exception {
+    SecurityFilterChain apiChain(HttpSecurity http, Accounts accounts) throws Exception {
         http.securityMatcher("/api/**")
                 .authorizeHttpRequests(a -> a
                         // SSE responses complete on async dispatches; the request was authorised already.
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/accounts", "/api/accounts/*/clients").permitAll()
                         .anyRequest().hasRole("CLI"))
-                .addFilterBefore(new ApiTokenFilter(apiToken), AuthorizationFilter.class)
+                .addFilterBefore(new ApiTokenFilter(accounts), AuthorizationFilter.class)
                 .csrf(c -> c.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .requestCache(c -> c.disable())
@@ -102,13 +105,18 @@ public class SecurityConfig {
                 || request.getRequestURI().equals(request.getContextPath() + "/stream");
     }
 
-    /** The single account. It has no usable password: passkeys and one-time links are the only ways in. */
+    /**
+     * One user per account, named by the account id. None has a usable password: passkeys and
+     * one-time links are the only ways in.
+     */
     @Bean
-    UserDetailsService users(SshaProperties props) {
-        return new InMemoryUserDetailsManager(User.withUsername(props.username())
-                .password("{noop}" + UUID.randomUUID())
-                .roles("USER")
-                .build());
+    UserDetailsService users(Accounts accounts) {
+        return username -> {
+            if (!accounts.exists(username)) {
+                throw new UsernameNotFoundException("no such account");
+            }
+            return User.withUsername(username).password("{noop}" + UUID.randomUUID()).roles("USER").build();
+        };
     }
 
     @Bean

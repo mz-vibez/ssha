@@ -7,7 +7,7 @@ import java.time.Instant;
  *
  * @param publicKey SSH wire-format public key blob (Ed25519 or RSA)
  */
-public record SshKey(String id, String label, byte[] publicKey, Instant created) {
+public record SshKey(String id, String accountId, String label, byte[] publicKey, Instant created) {
 
     /** "ED25519" or e.g. "RSA 4096". */
     public String type() {

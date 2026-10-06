@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,7 +24,6 @@ import org.springframework.web.util.UriComponentsBuilder;
 import com.jayway.jsonpath.JsonPath;
 
 @SpringBootTest(properties = {
-        "ssha.api-token=test-token",
         "ssha.rp-id=localhost",
         "ssha.allowed-origins=http://localhost",
         "spring.datasource.url=jdbc:h2:mem:ssha-test;DB_CLOSE_DELAY=-1",
@@ -31,10 +31,21 @@ import com.jayway.jsonpath.JsonPath;
 @AutoConfigureMockMvc
 class SecurityTest {
 
-    private static final String BEARER = "Bearer test-token";
 
     @Autowired
     MockMvc mvc;
+    @Autowired
+    Accounts accounts;
+
+    String account;
+    String bearer;
+
+    @BeforeEach
+    void createAccount() {
+        Accounts.Enrolled enrolled = accounts.create("laptop");
+        account = enrolled.accountId();
+        bearer = "Bearer " + enrolled.token();
+    }
 
     // --- web: anonymous access ---------------------------------------------------------------
 
@@ -70,7 +81,7 @@ class SecurityTest {
     void passkeyRegistrationNeedsSignIn() throws Exception {
         // Spring's options filter refuses anonymous callers itself.
         mvc.perform(post("/webauthn/register/options").with(csrf())).andExpect(status().isBadRequest());
-        mvc.perform(post("/webauthn/register/options").with(csrf()).with(user("maykelange")))
+        mvc.perform(post("/webauthn/register/options").with(csrf()).with(user(account)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rp.id").value("localhost"))
                 .andExpect(jsonPath("$.authenticatorSelection.residentKey").value("required"));
@@ -80,40 +91,40 @@ class SecurityTest {
 
     @Test
     void signedInUserSeesApprovalsPage() throws Exception {
-        mvc.perform(get("/").with(user("maykelange")))
+        mvc.perform(get("/").with(user(account)))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("No sign requests waiting")));
-        mvc.perform(get("/stream").with(user("maykelange"))).andExpect(request().asyncStarted());
+        mvc.perform(get("/stream").with(user(account))).andExpect(request().asyncStarted());
     }
 
     @Test
     void postingRequiresCsrfToken() throws Exception {
-        mvc.perform(post("/sign/x/deny").with(user("maykelange")).header("HX-Request", "true"))
+        mvc.perform(post("/sign/x/deny").with(user(account)).header("HX-Request", "true"))
                 .andExpect(status().isForbidden());
-        mvc.perform(post("/sign/x/deny").with(user("maykelange")).with(csrf()).header("HX-Request", "true"))
+        mvc.perform(post("/sign/x/deny").with(user(account)).with(csrf()).header("HX-Request", "true"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void chatIsGone() throws Exception {
-        mvc.perform(post("/messages").with(user("maykelange")).with(csrf()).param("text", "hi"))
+        mvc.perform(post("/messages").with(user(account)).with(csrf()).param("text", "hi"))
                 .andExpect(status().isNotFound());
-        mvc.perform(post("/api/messages").header("Authorization", BEARER).contentType(MediaType.TEXT_PLAIN)
+        mvc.perform(post("/api/messages").header("Authorization", bearer).contentType(MediaType.TEXT_PLAIN)
                         .content("hi"))
                 .andExpect(status().isNotFound());
-        mvc.perform(get("/api/stream").header("Authorization", BEARER)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/stream").header("Authorization", bearer)).andExpect(status().isNotFound());
     }
 
     @Test
     void passkeysPageListsNothingInitially() throws Exception {
-        mvc.perform(get("/passkeys").with(user("maykelange")))
+        mvc.perform(get("/passkeys").with(user(account)))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("no passkeys yet")));
     }
 
     @Test
     void cannotDeleteUnknownPasskey() throws Exception {
-        mvc.perform(post("/passkeys/AAAA/delete").with(user("maykelange")).with(csrf()))
+        mvc.perform(post("/passkeys/AAAA/delete").with(user(account)).with(csrf()))
                 .andExpect(status().isNotFound());
     }
 
@@ -130,7 +141,7 @@ class SecurityTest {
 
     @Test
     void apiAcceptsToken() throws Exception {
-        mvc.perform(get("/api/keys").header("Authorization", BEARER))
+        mvc.perform(get("/api/keys").header("Authorization", bearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }
@@ -139,7 +150,7 @@ class SecurityTest {
 
     @Test
     void enrollLinkSignsInOnceAndLandsOnPasskeys() throws Exception {
-        String body = mvc.perform(post("/api/enroll").header("Authorization", BEARER))
+        String body = mvc.perform(post("/api/enroll").header("Authorization", bearer))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String url = JsonPath.read(body, "$.url");
@@ -165,7 +176,7 @@ class SecurityTest {
 
     @Test
     void publicTokenGenerationEndpointDeliversNothing() throws Exception {
-        mvc.perform(post("/ott/generate").with(csrf()).param("username", "maykelange"))
+        mvc.perform(post("/ott/generate").with(csrf()).param("username", account))
                 .andExpect(status().isNotFound());
     }
 }

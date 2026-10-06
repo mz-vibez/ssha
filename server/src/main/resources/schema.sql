@@ -38,3 +38,26 @@ create table if not exists ssh_keys
 );
 -- Widened for RSA keys (an 8192-bit public key is about 1 KB); a no-op once applied.
 alter table ssh_keys alter column public_key set data type varbinary(2048);
+
+-- Accounts: the id is a random secret-ish handle; it is also the phone's sign-in name.
+create table if not exists accounts
+(
+    id      varchar(64) not null,
+    created timestamp   not null,
+    primary key (id)
+);
+
+-- Computers allowed to use an account's agent. Only a hash of each bearer token is stored.
+create table if not exists clients
+(
+    id         varchar(64)    not null,
+    account_id varchar(64)    not null,
+    name       varchar(100)   not null,
+    token_hash varbinary(32)  not null,
+    created    timestamp      not null,
+    last_used  timestamp,
+    primary key (id),
+    unique (token_hash)
+);
+
+alter table ssh_keys add column if not exists account_id varchar(64);

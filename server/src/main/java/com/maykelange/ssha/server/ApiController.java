@@ -1,8 +1,10 @@
 package com.maykelange.ssha.server;
 
+import java.security.Principal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
@@ -14,6 +16,7 @@ import org.springframework.security.authentication.ott.OneTimeToken;
 import org.springframework.security.authentication.ott.OneTimeTokenService;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,7 +26,12 @@ import org.springframework.web.context.request.async.DeferredResult;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-/** JSON API used by the CLI. Every endpoint requires the bearer token (see {@link SecurityConfig}). */
+import jakarta.servlet.http.HttpServletRequest;
+
+/**
+ * JSON API used by the CLI. Every endpoint requires a client's bearer token (see {@link SecurityConfig}),
+ * except creating an account and asking to join one, which is how a computer gets its token.
+ */
 @RestController
 @RequestMapping("/api")
 public class ApiController {
@@ -32,15 +40,81 @@ public class ApiController {
 
     private final OneTimeTokenService oneTimeTokens;
     private final SshaProperties props;
+    private final Accounts accounts;
+    private final JoinService joins;
     private final SshKeys sshKeys;
     private final SignService signs;
 
-    public ApiController(OneTimeTokenService oneTimeTokens, SshaProperties props, SshKeys sshKeys,
-                         SignService signs) {
+    public ApiController(OneTimeTokenService oneTimeTokens, SshaProperties props, Accounts accounts,
+                         JoinService joins, SshKeys sshKeys, SignService signs) {
         this.oneTimeTokens = oneTimeTokens;
         this.props = props;
+        this.accounts = accounts;
+        this.joins = joins;
         this.sshKeys = sshKeys;
         this.signs = signs;
+    }
+
+    /** @param client a name for the computer, e.g. its host name */
+    public record NewClient(String client) {
+    }
+
+    /** @param token the computer's bearer token; it is not stored anywhere in clear */
+    public record Enrolled(String account, String token) {
+    }
+
+    /** A new account, with the calling computer as its first client. */
+    @PostMapping("/accounts")
+    public Enrolled createAccount(@RequestBody NewClient request) {
+        if (!props.openRegistration()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this server doesn't accept new accounts");
+        }
+        Accounts.Enrolled enrolled = accounts.create(clientName(request.client()));
+        return new Enrolled(enrolled.accountId(), enrolled.token());
+    }
+
+    /** @param code shown next to the request on the phone, so it can be matched to the terminal */
+    public record JoinRequest(String client, String code) {
+    }
+
+    /**
+     * Asks to add the calling computer to an account. Waits until the request is accepted (200 with
+     * the computer's token), denied (403) or not answered in time (408) on the phone.
+     */
+    @PostMapping("/accounts/{account}/clients")
+    public DeferredResult<ResponseEntity<?>> join(@PathVariable String account, @RequestBody JoinRequest request,
+                                                  HttpServletRequest http) {
+        String code = request.code() == null ? "" : request.code().strip();
+        if (code.length() > 20 || code.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("invalid code");
+        }
+        CompletableFuture<Accounts.Enrolled> result;
+        try {
+            result = joins.request(account, clientName(request.client()), code, http.getRemoteAddr());
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+        }
+        DeferredResult<ResponseEntity<?>> response = new DeferredResult<>();
+        response.onError(e -> result.cancel(false));
+        result.whenComplete((enrolled, error) -> response.setResult(switch (error) {
+            case null -> ResponseEntity.ok(new Enrolled(enrolled.accountId(), enrolled.token()));
+            case SignService.DeniedException e -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
+            case TimeoutException e -> ResponseEntity.status(HttpStatus.REQUEST_TIMEOUT).body("not answered on the phone in time");
+            case CancellationException e -> ResponseEntity.status(HttpStatus.GONE).build();
+            default -> ResponseEntity.internalServerError().build();
+        }));
+        return response;
+    }
+
+    public record Account(String account) {
+    }
+
+    /** The account this computer belongs to. */
+    @GetMapping("/account")
+    public Account account(Principal principal) {
+        return new Account(principal.getName());
     }
 
     public record EnrollLink(String url, Instant expiresAt) {
@@ -48,9 +122,9 @@ public class ApiController {
 
     /** A single-use sign-in link for the phone, used to register a (first or additional) passkey. */
     @PostMapping("/enroll")
-    public EnrollLink enroll() {
+    public EnrollLink enroll(Principal principal) {
         OneTimeToken token = oneTimeTokens.generate(
-                new GenerateOneTimeTokenRequest(props.username(), ENROLL_LINK_VALIDITY));
+                new GenerateOneTimeTokenRequest(principal.getName(), ENROLL_LINK_VALIDITY));
         String url = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/login/ott")
                 .queryParam("token", token.getTokenValue())
@@ -63,8 +137,8 @@ public class ApiController {
 
     /** The keys the agent offers to ssh. */
     @GetMapping("/keys")
-    public List<AgentKey> keys() {
-        return sshKeys.findAll().stream()
+    public List<AgentKey> keys(Principal principal) {
+        return sshKeys.findAll(principal.getName()).stream()
                 .map(k -> new AgentKey(k.id(), k.label(), k.publicKey(), k.authorizedKey()))
                 .toList();
     }
@@ -86,18 +160,17 @@ public class ApiController {
      * answered in time (408) on the phone.
      */
     @PostMapping("/sign")
-    public DeferredResult<ResponseEntity<?>> sign(@RequestBody SignRequest request) {
+    public DeferredResult<ResponseEntity<?>> sign(@RequestBody SignRequest request, Principal principal) {
         if (request.publicKey() == null || request.data() == null) {
             throw new IllegalArgumentException("publicKey and data are required");
         }
         if (request.data().length > SignService.MAX_DATA_LENGTH) {
             throw new IllegalArgumentException("data too long");
         }
-        SshKey key = sshKeys.findByPublicKey(request.publicKey())
+        SshKey key = sshKeys.findByPublicKey(principal.getName(), request.publicKey())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown key"));
-        String client = request.client() == null || request.client().isBlank() ? "cli" : request.client().strip();
         CompletableFuture<byte[]> result = signs.request(key, request.data(), request.flags(), request.binding(),
-                client.length() > 100 ? client.substring(0, 100) : client);
+                clientName(request.client()));
 
         DeferredResult<ResponseEntity<?>> response = new DeferredResult<>();
         // The agent gave up (ssh was interrupted): take the request off the phone.
@@ -110,6 +183,14 @@ public class ApiController {
             default -> ResponseEntity.internalServerError().build();
         }));
         return response;
+    }
+
+    private static String clientName(String name) {
+        String client = name == null ? "" : name.strip().replaceAll("\\p{Cntrl}", "");
+        if (client.isEmpty()) {
+            return "cli";
+        }
+        return client.length() > 100 ? client.substring(0, 100) : client;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

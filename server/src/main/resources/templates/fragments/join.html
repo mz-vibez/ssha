@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<section th:fragment="join" class="sign join" th:id="|join-${p.id}|">
+    <div class="sign-title">
+        <strong>New computer</strong>
+        <time th:datetime="${p.requestedAt}"
+              th:text="${#temporals.format(p.requestedAt.atZone(T(java.time.ZoneId).systemDefault()), 'HH:mm:ss')}">12:00:00</time>
+    </div>
+    <dl>
+        <dt>Name</dt>
+        <dd th:text="${p.client}">laptop</dd>
+        <dt>Address</dt>
+        <dd><code th:text="${p.address}">192.0.2.1</code></dd>
+        <th:block th:if="${!#strings.isEmpty(p.code)}">
+            <dt>Code</dt>
+            <dd><strong th:text="${p.code}">123 456</strong></dd>
+        </th:block>
+    </dl>
+    <p class="hint">
+        Wants to use this account's SSH keys (each signature still needs your approval here). Accept only if
+        you just ran <code>ssha-cli</code> there and its terminal shows the same code.
+    </p>
+    <div class="actions">
+        <button type="button" class="deny" th:attr="hx-post=|/join/${p.id}/deny|" hx-swap="none">Deny</button>
+        <button type="button" class="approve" th:attr="hx-post=|/join/${p.id}/accept|" hx-swap="none">Accept</button>
+    </div>
+</section>
+</body>
+</html>

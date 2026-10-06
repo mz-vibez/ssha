@@ -5,8 +5,10 @@ An SSH agent whose keys live on your phone: every signature is approved, and mad
 - `server/` — Spring Boot (port 9091). The phone pages are server-rendered Thymeleaf templates;
   sign requests are rendered to HTML on the server and pushed over Server-Sent Events, htmx just
   swaps them into the page.
-- `cli/` — plain Java 25 client (no Spring, also builds as a GraalVM native executable): the agent itself, plus enrolment and key listing, talking
-  to the server's `/api` endpoints.
+- `cli/` — plain Java 25 client (no Spring, also builds as a GraalVM native executable): the agent itself, plus account setup, enrolment and
+  key listing, talking to the server's `/api` endpoints.
+
+The server hosts any number of accounts. Each has its own passkeys, SSH keys, sign requests and computers.
 
 Public URL: https://ssha.apps.maykelange.com/ (load balancer → this machine:9091)
 
@@ -34,11 +36,29 @@ executable finds the project's `data/` folder from its own location; a copy else
 
 ## Use the CLI
 
+    java -jar cli/target/ssha-cli.jar                 # first run: create an account (see Accounts below)
+    java -jar cli/target/ssha-cli.jar --account ID    # first run on another computer: join account ID
     java -jar cli/target/ssha-cli.jar enroll          # QR code + one-time link to add a passkey on the phone
     java -jar cli/target/ssha-cli.jar agent           # ssh-agent backed by the phone (see below)
     java -jar cli/target/ssha-cli.jar keys            # the phone's SSH public keys as authorized_keys lines
 
 The CLI targets the public URL by default; override with `--url http://localhost:9091` or `$SSHA_URL`.
+
+## Accounts
+
+- **New account:** run `ssha-cli` on a computer that has no token yet. The server creates an account with a random
+  id (128 bits, e.g. `l5Gn7tgVI4tpy-ufe7RiZA`) and a token for this computer, saved to `data/token` (mode 600).
+  The CLI prints the id and a QR code for adding the account's first passkey on the phone.
+  Set `ssha.open-registration=false` to stop strangers from creating accounts on your server.
+- **Another computer:** run `ssha-cli --account <id>` (or set `$SSHA_ACCOUNT`) there. The phone's start page shows a
+  *New computer* card with its host name, IP address and a code that is also printed in the terminal; **Accept**
+  gives that computer its own token. Unanswered requests fail after 2 minutes (`ssha.join-timeout`), and an account
+  has at most 5 requests waiting at once.
+- **Computers** on the phone lists every computer with access and when it was last used; **Remove** revokes its token.
+- The account id is the account's name on the phone (it's what the passkey is registered under). Knowing it only lets
+  someone *ask* to join; the phone still has to accept.
+- `ssha-cli` with no command on a set-up computer prints its account id. With a token, `--account` just checks
+  that the token belongs to that account.
 
 ## SSH agent
 
@@ -80,13 +100,16 @@ Things to know:
 
 ## Authentication
 
-- **Phone:** passkeys only (Spring Security WebAuthn), one account (`ssha.username`). Sessions last
+- **Phone:** passkeys only (Spring Security WebAuthn); each account is a user named by its id. Sessions last
   30 days of inactivity but live in memory, so a server restart means one passkey tap.
 - **First passkey / new device / recovery:** run `ssha-cli enroll`, scan the QR code, press
   *Continue*, then *Add* on the passkeys page. Links are single use and expire after 10 minutes.
-- **CLI:** bearer token. The server generates `data/token` (mode 600) on first start; the CLI reads
-  it from there. On another machine, set `$SSHA_TOKEN`. To rotate: delete the file and restart the server.
-- Passkeys are stored in an H2 database in `data/`.
+- **CLI:** a bearer token per computer, from `$SSHA_TOKEN` or `data/token`. The server stores only SHA-256
+  hashes of tokens. To rotate one: remove the computer on the phone, delete `data/token` and join again.
+- **Upgrading from the single-user version:** on the first start, the existing passkeys and SSH keys become one
+  account, and the old server-generated `data/token` becomes one of its computers, so nothing needs redoing.
+  Run `ssha-cli` to see the new account id.
+- Accounts, tokens, passkeys and public keys are stored in an H2 database in `data/`.
 - Nothing is stored outside the project folder. Both jars locate the project folder from their own
   location, so they can be started from any directory. `data/` is git-ignored — it holds secrets.
 - Passkeys are bound to `ssha.rp-id` (`ssha.apps.maykelange.com`); changing the domain invalidates them.
@@ -100,6 +123,12 @@ Things to know:
 | GET    | `/passkeys`     | phone   | List / add / delete passkeys                                  |
 | GET    | `/`             | phone   | Start page: sign requests waiting for approval                |
 | GET    | `/stream`       | phone   | SSE of rendered sign request cards; pending ones on connect   |
+| GET    | `/clients`      | phone   | Computers with access to the account; remove them             |
+| POST   | `/join/{id}/accept` | phone | Accept a computer's join request; 204                        |
+| POST   | `/join/{id}/deny` | phone | 204                                                           |
+| POST   | `/api/accounts` | CLI (no token) | `{client}` → new account `{account, token}`            |
+| POST   | `/api/accounts/{id}/clients` | CLI (no token) | `{client, code}`; waits for the phone: 200 `{account, token}`, 403, 404, 408, 429 |
+| GET    | `/api/account`  | CLI     | `{account}` the token belongs to                              |
 | POST   | `/api/enroll`   | CLI     | Returns a one-time sign-in link `{url, expiresAt}`            |
 | GET    | `/keys`         | phone   | List / create / delete SSH keys                               |
 | POST   | `/sign/{id}/approve` | phone | Form field `signature` (raw signature, base64url); 204     |
@@ -107,9 +136,10 @@ Things to know:
 | GET    | `/api/keys`     | CLI     | Public keys for the agent                                     |
 | POST   | `/api/sign`     | CLI     | Waits for the phone: 200 `{signature}`, 403 denied, 408 timeout |
 
-All `/api` endpoints need `Authorization: Bearer <token>`; everything else needs a signed-in session.
+All other `/api` endpoints need `Authorization: Bearer <token>` and act on that token's account; everything else
+needs a signed-in session and acts on its account.
 
-Pending sign requests are kept in memory; a server restart fails them (ssh just reports an agent error).
+Pending sign and join requests are kept in memory; a server restart fails them (ssh just reports an agent error).
 
 ## License
 

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/head :: meta('ssha · computers')}"></th:block>
+</head>
+<body class="page">
+<main class="card">
+    <p><a href="/">← Sign requests</a></p>
+    <h1>Computers</h1>
+
+    <p class="notice" th:if="${clients.isEmpty()}">No computer can use this account.</p>
+    <ul class="passkeys" th:unless="${clients.isEmpty()}">
+        <li th:each="c : ${clients}" th:with="zone=${T(java.time.ZoneId).systemDefault()}">
+            <div>
+                <strong th:text="${c.name}">laptop</strong>
+                <div class="hint">
+                    added <span th:text="${#temporals.format(c.created.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span><th:block th:if="${c.lastUsed}">,
+                    last used <span th:text="${#temporals.format(c.lastUsed.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span></th:block>
+                </div>
+            </div>
+            <form method="post" th:action="@{/clients/{id}/delete(id=${c.id})}"
+                  onsubmit="return confirm('Remove this computer? Its ssha-cli stops working.')">
+                <button type="submit" class="danger">Remove</button>
+            </form>
+        </li>
+    </ul>
+
+    <h2>Add a computer</h2>
+    <p class="hint">Run this on the other computer, then accept its request on the start page:</p>
+    <textarea class="pubkey" readonly rows="2" aria-label="Command"
+              th:text="|ssha-cli --account ${account}|">ssha-cli --account …</textarea>
+</main>
+</body>
+</html>

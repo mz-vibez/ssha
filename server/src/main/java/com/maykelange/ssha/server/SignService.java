@@ -71,8 +71,8 @@ public class SignService {
         this.streams = streams;
         this.templates = templates;
         this.props = props;
-        // A page that (re)connects gets every request that is still waiting.
-        streams.onConnect(emitter -> pending().forEach(p -> streams.send(emitter, "sign", render(p))));
+        // A page that (re)connects gets every request of its account that is still waiting.
+        streams.onConnect((account, emitter) -> pending(account).forEach(p -> streams.send(emitter, "sign", render(p))));
     }
 
     /**
@@ -91,15 +91,15 @@ public class SignService {
         pending.put(p.id(), p);
         p.result().orTimeout(props.signTimeout().toMillis(), TimeUnit.MILLISECONDS).whenComplete((sig, err) -> {
             pending.remove(p.id());
-            streams.broadcast("sign", "<div id=\"sign-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
+            streams.broadcast(key.accountId(), "sign", "<div id=\"sign-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
         });
-        streams.broadcast("sign", render(p));
+        streams.broadcast(key.accountId(), "sign", render(p));
         return p.result();
     }
 
     /** @param signature the raw signature made on the phone (Ed25519, or RSASSA-PKCS1-v1_5) */
-    public void approve(String id, byte[] signature) {
-        Pending p = find(id);
+    public void approve(String accountId, String id, byte[] signature) {
+        Pending p = find(accountId, id);
         byte[] blob = SshWire.signatureBlob(p.algorithm(), signature);
         if (!SshWire.verify(p.key().publicKey(), p.data(), blob)) {
             throw new IllegalArgumentException("the signature does not match the key");
@@ -107,17 +107,21 @@ public class SignService {
         p.result().complete(blob);
     }
 
-    public void deny(String id) {
-        find(id).result().completeExceptionally(new DeniedException());
+    public void deny(String accountId, String id) {
+        find(accountId, id).result().completeExceptionally(new DeniedException());
     }
 
-    public List<Pending> pending() {
-        return pending.values().stream().sorted(Comparator.comparing(Pending::requestedAt)).toList();
+    public List<Pending> pending(String accountId) {
+        return pending.values().stream()
+                .filter(p -> p.key().accountId().equals(accountId))
+                .sorted(Comparator.comparing(Pending::requestedAt))
+                .toList();
     }
 
-    private Pending find(String id) {
+    /** Another account's request is as unknown as a missing one. */
+    private Pending find(String accountId, String id) {
         Pending p = pending.get(id);
-        if (p == null) {
+        if (p == null || !p.key().accountId().equals(accountId)) {
             throw new NoSuchElementException("no such request (answered or expired)");
         }
         return p;

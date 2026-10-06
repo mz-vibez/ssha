@@ -35,7 +35,6 @@ import org.springframework.test.web.servlet.MvcResult;
 import com.jayway.jsonpath.JsonPath;
 
 @SpringBootTest(properties = {
-        "ssha.api-token=test-token",
         "ssha.rp-id=localhost",
         "ssha.allowed-origins=http://localhost",
         "spring.datasource.url=jdbc:h2:mem:ssha-sign-test;DB_CLOSE_DELAY=-1",
@@ -43,7 +42,6 @@ import com.jayway.jsonpath.JsonPath;
 @AutoConfigureMockMvc
 class SshSignTest {
 
-    private static final String BEARER = "Bearer test-token";
     private static final Base64.Encoder B64URL = Base64.getUrlEncoder().withoutPadding();
 
     @Autowired
@@ -52,6 +50,11 @@ class SshSignTest {
     SignService signs;
     @Autowired
     JdbcTemplate jdbc;
+    @Autowired
+    Accounts accounts;
+
+    String account;
+    String bearer;
 
     KeyPair phoneKey;
     byte[] publicBlob;
@@ -59,12 +62,15 @@ class SshSignTest {
     @BeforeEach
     void createKeyOnThePhone() throws Exception {
         jdbc.update("delete from ssh_keys");
+        Accounts.Enrolled enrolled = accounts.create("laptop");
+        account = enrolled.accountId();
+        bearer = "Bearer " + enrolled.token();
         phoneKey = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
         byte[] encoded = phoneKey.getPublic().getEncoded();
         byte[] raw = Arrays.copyOfRange(encoded, encoded.length - 32, encoded.length);
         publicBlob = SshWire.ed25519Blob(raw);
 
-        mvc.perform(post("/keys").with(user("maykelange")).with(csrf())
+        mvc.perform(post("/keys").with(user(account)).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"label\":\"phone\",\"publicKey\":\"" + B64URL.encodeToString(publicBlob) + "\"}"))
                 .andExpect(status().isOk())
@@ -74,15 +80,15 @@ class SshSignTest {
 
     @Test
     void importingAKeyThatExistsKeepsTheEntry() throws Exception {
-        mvc.perform(post("/keys").with(user("maykelange")).with(csrf())
+        mvc.perform(post("/keys").with(user(account)).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"label\":\"other name\",\"publicKey\":\"" + B64URL.encodeToString(publicBlob) + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(SshWire.keyId(publicBlob)));
-        mvc.perform(get("/api/keys").header("Authorization", BEARER))
+        mvc.perform(get("/api/keys").header("Authorization", bearer))
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].label").value("phone"));
-        mvc.perform(post("/keys").with(user("maykelange")).with(csrf())
+        mvc.perform(post("/keys").with(user(account)).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"label\":\"x\",\"publicKey\":\"AAAA\"}"))
                 .andExpect(status().isBadRequest());
     }
@@ -95,22 +101,22 @@ class SshSignTest {
         RSAPublicKey pub = (RSAPublicKey) rsa.getPublic();
         byte[] blob = new SshWire.Writer().string("ssh-rsa").string(pub.getPublicExponent().toByteArray())
                 .string(pub.getModulus().toByteArray()).toByteArray();
-        mvc.perform(post("/keys").with(user("maykelange")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/keys").with(user(account)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"label\":\"old laptop\",\"publicKey\":\"" + B64URL.encodeToString(blob) + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.authorizedKey").value(org.hamcrest.Matchers.startsWith("ssh-rsa AAAA")));
-        mvc.perform(get("/keys").with(user("maykelange")))
+        mvc.perform(get("/keys").with(user(account)))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("RSA 3072")));
 
         byte[] data = "sign me".getBytes(StandardCharsets.UTF_8);
         for (var c : new String[][] {{"2", "rsa-sha2-256", "SHA256withRSA", "SHA-256"}, {"4", "rsa-sha2-512", "SHA512withRSA", "SHA-512"}}) {
-            MvcResult pending = mvc.perform(post("/api/sign").header("Authorization", BEARER)
+            MvcResult pending = mvc.perform(post("/api/sign").header("Authorization", bearer)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(signJson(blob, data, null).replace("\"flags\":0", "\"flags\":" + c[0])))
                     .andExpect(request().asyncStarted())
                     .andReturn();
             assertThat(onlyPending().hash()).isEqualTo(c[3]);
-            mvc.perform(post("/sign/" + onlyPending().id() + "/approve").with(user("maykelange")).with(csrf())
+            mvc.perform(post("/sign/" + onlyPending().id() + "/approve").with(user(account)).with(csrf())
                             .param("signature", B64URL.encodeToString(sign(rsa.getPrivate(), c[2], data))))
                     .andExpect(status().isNoContent());
             String body = mvc.perform(asyncDispatch(pending)).andExpect(status().isOk())
@@ -121,11 +127,11 @@ class SshSignTest {
         }
 
         // Legacy SHA-1 "ssh-rsa" signatures are refused up front.
-        mvc.perform(post("/api/sign").header("Authorization", BEARER).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/sign").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
                         .content(signJson(blob, data, null)))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("SHA-1")));
-        assertThat(signs.pending()).isEmpty();
+        assertThat(signs.pending(account)).isEmpty();
     }
 
     @Test
@@ -135,7 +141,7 @@ class SshSignTest {
         RSAPublicKey pub = (RSAPublicKey) generator.generateKeyPair().getPublic();
         byte[] blob = new SshWire.Writer().string("ssh-rsa").string(pub.getPublicExponent().toByteArray())
                 .string(pub.getModulus().toByteArray()).toByteArray();
-        mvc.perform(post("/keys").with(user("maykelange")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/keys").with(user(account)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"label\":\"old\",\"publicKey\":\"" + B64URL.encodeToString(blob) + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string("RSA keys need at least 2048 bits"));
@@ -143,7 +149,7 @@ class SshSignTest {
 
     @Test
     void agentListsThePhonesKeys() throws Exception {
-        mvc.perform(get("/api/keys").header("Authorization", BEARER))
+        mvc.perform(get("/api/keys").header("Authorization", bearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].label").value("phone"))
                 .andExpect(jsonPath("$[0].publicKey").value(Base64.getEncoder().encodeToString(publicBlob)));
@@ -156,7 +162,7 @@ class SshSignTest {
         MvcResult pending = startSign(data, null);
         String id = onlyPending().id();
 
-        mvc.perform(post("/sign/" + id + "/approve").with(user("maykelange")).with(csrf())
+        mvc.perform(post("/sign/" + id + "/approve").with(user(account)).with(csrf())
                         .param("signature", B64URL.encodeToString(sign(phoneKey.getPrivate(), "Ed25519", data))))
                 .andExpect(status().isNoContent());
 
@@ -165,7 +171,7 @@ class SshSignTest {
                 .andReturn().getResponse().getContentAsString();
         byte[] signature = Base64.getDecoder().decode((String) JsonPath.read(body, "$.signature"));
         assertThat(SshWire.verify(publicBlob, data, signature)).isTrue();
-        assertThat(signs.pending()).isEmpty();
+        assertThat(signs.pending(account)).isEmpty();
     }
 
     @Test
@@ -175,15 +181,15 @@ class SshSignTest {
         String id = onlyPending().id();
         KeyPair other = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
 
-        mvc.perform(post("/sign/" + id + "/approve").with(user("maykelange")).with(csrf())
+        mvc.perform(post("/sign/" + id + "/approve").with(user(account)).with(csrf())
                         .param("signature", B64URL.encodeToString(sign(other.getPrivate(), "Ed25519", data))))
                 .andExpect(status().isBadRequest());
-        assertThat(signs.pending()).hasSize(1);
+        assertThat(signs.pending(account)).hasSize(1);
 
-        mvc.perform(post("/sign/" + id + "/deny").with(user("maykelange")).with(csrf()))
+        mvc.perform(post("/sign/" + id + "/deny").with(user(account)).with(csrf()))
                 .andExpect(status().isNoContent());
         mvc.perform(asyncDispatch(pending)).andExpect(status().isForbidden());
-        assertThat(signs.pending()).isEmpty();
+        assertThat(signs.pending(account)).isEmpty();
     }
 
     @Test
@@ -192,11 +198,11 @@ class SshSignTest {
         String id = onlyPending().id();
         mvc.perform(post("/sign/" + id + "/deny").with(csrf()).header("HX-Request", "true"))
                 .andExpect(status().isUnauthorized());
-        mvc.perform(post("/sign/" + id + "/deny").with(user("maykelange"))).andExpect(status().isForbidden());
-        mvc.perform(post("/sign/" + id + "/deny").header("Authorization", BEARER)).andExpect(status().isForbidden());
-        mvc.perform(post("/sign/" + id + "/deny").with(user("maykelange")).with(csrf()))
+        mvc.perform(post("/sign/" + id + "/deny").with(user(account))).andExpect(status().isForbidden());
+        mvc.perform(post("/sign/" + id + "/deny").header("Authorization", bearer)).andExpect(status().isForbidden());
+        mvc.perform(post("/sign/" + id + "/deny").with(user(account)).with(csrf()))
                 .andExpect(status().isNoContent());
-        mvc.perform(post("/sign/" + id + "/deny").with(user("maykelange")).with(csrf()))
+        mvc.perform(post("/sign/" + id + "/deny").with(user(account)).with(csrf()))
                 .andExpect(status().isNotFound());
     }
 
@@ -205,7 +211,7 @@ class SshSignTest {
         KeyPair other = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
         byte[] encoded = other.getPublic().getEncoded();
         byte[] blob = SshWire.ed25519Blob(Arrays.copyOfRange(encoded, encoded.length - 32, encoded.length));
-        mvc.perform(post("/api/sign").header("Authorization", BEARER).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/sign").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
                         .content(signJson(blob, new byte[] {1}, null)))
                 .andExpect(status().isNotFound());
     }
@@ -230,7 +236,7 @@ class SshSignTest {
         assertThat(details.hostKey()).isEqualTo(SshWire.fingerprint(hostBlob));
         assertThat(details.hostVerified()).isTrue();
         assertThat(details.warning()).isNull();
-        signs.deny(onlyPending().id());
+        signs.deny(account, onlyPending().id());
 
         // A binding for another session (or a forged host signature) is flagged.
         byte[] otherSession = new byte[32];
@@ -238,7 +244,7 @@ class SshSignTest {
                 new SignService.Binding(hostBlob, sessionId, hostSignature, false));
         assertThat(onlyPending().details().hostVerified()).isFalse();
         assertThat(onlyPending().details().warning()).contains("does not match");
-        signs.deny(onlyPending().id());
+        signs.deny(account, onlyPending().id());
     }
 
     @Test
@@ -257,7 +263,7 @@ class SshSignTest {
 
     @Test
     void keysPageShowsAuthorizedKeysLine() throws Exception {
-        mvc.perform(get("/keys").with(user("maykelange")))
+        mvc.perform(get("/keys").with(user(account)))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString(
                         "ssh-ed25519 " + Base64.getEncoder().encodeToString(publicBlob) + " ssha:phone")));
@@ -267,15 +273,15 @@ class SshSignTest {
     // --- helpers -----------------------------------------------------------------------------
 
     private MvcResult startSign(byte[] data, SignService.Binding binding) throws Exception {
-        return mvc.perform(post("/api/sign").header("Authorization", BEARER).contentType(MediaType.APPLICATION_JSON)
+        return mvc.perform(post("/api/sign").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
                         .content(signJson(publicBlob, data, binding)))
                 .andExpect(request().asyncStarted())
                 .andReturn();
     }
 
     private SignService.Pending onlyPending() {
-        assertThat(signs.pending()).hasSize(1);
-        return signs.pending().getFirst();
+        assertThat(signs.pending(account)).hasSize(1);
+        return signs.pending(account).getFirst();
     }
 
     private static String signJson(byte[] key, byte[] data, SignService.Binding binding) {
