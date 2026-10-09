@@ -98,6 +98,9 @@ public class SecurityConfig {
                         .tokenGenerationSuccessHandler((req, res, token) -> res.sendError(HttpStatus.NOT_FOUND.value()))
                         .showDefaultSubmitPage(false)
                         .successHandler(new SimpleUrlAuthenticationSuccessHandler("/passkeys")))
+                // Sign-in always ends on the start page: a saved request would send the phone to whatever file
+                // was refused last, e.g. /app.js fetched by the service worker while signed out.
+                .requestCache(c -> c.disable())
                 .logout(l -> l.logoutSuccessUrl("/login?logout"))
                 .headers(h -> h.contentSecurityPolicy(c -> c.policyDirectives(CONTENT_SECURITY_POLICY)))
                 .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint()));
