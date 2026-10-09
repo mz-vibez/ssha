@@ -19,7 +19,8 @@
         </th:block>
         <th:block th:if="${p.details.hostKey}">
             <dt>Host</dt>
-            <dd><code th:text="${p.details.hostKey}">SHA256:…</code>
+            <dd><strong th:if="${p.hostName}" th:text="${p.hostName}">example.com</strong>
+                <code th:text="${p.details.hostKey}">SHA256:…</code>
                 <span th:class="${p.details.hostVerified} ? 'ok' : 'bad'"
                       th:text="${p.details.hostVerified} ? 'verified' : 'unverified'">verified</span>
                 <span th:if="${p.newHost()}" class="bad">· first login to this host</span>

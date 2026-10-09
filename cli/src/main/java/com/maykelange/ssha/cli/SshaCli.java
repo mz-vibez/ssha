@@ -65,7 +65,11 @@ public final class SshaCli {
     record AgentKey(String id, String label, byte[] publicKey, String authorizedKey) {
     }
 
-    record SignRequest(byte[] publicKey, byte[] data, int flags, SshAgent.Binding binding) {
+    /** @param hostName the host's name from the user's known_hosts, if the bound host key is listed there */
+    record SignRequest(byte[] publicKey, byte[] data, int flags, SshAgent.Binding binding, String hostName) {
+        SignRequest(byte[] publicKey, byte[] data, int flags, SshAgent.Binding binding) {
+            this(publicKey, data, flags, binding, null);
+        }
     }
 
     record SignResponse(byte[] signature) {
@@ -391,7 +395,8 @@ public final class SshaCli {
             @Override
             public byte[] sign(byte[] publicKey, byte[] data, int flags, SshAgent.Binding binding)
                     throws IOException, InterruptedException {
-                return requestSignature(new SignRequest(publicKey, data, flags, binding));
+                String hostName = binding == null ? null : KnownHostNames.find(binding.hostKey());
+                return requestSignature(new SignRequest(publicKey, data, flags, binding, hostName));
             }
         });
         agent.serve(AGENT_SOCKET, () -> {

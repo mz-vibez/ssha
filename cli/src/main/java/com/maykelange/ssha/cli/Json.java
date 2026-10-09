@@ -98,6 +98,9 @@ final class Json {
                 g.writeName("forwarded").writeBoolean(b.forwarded());
                 g.writeEndObject();
             }
+            if (request.hostName() != null) {
+                g.writeName("hostName").writeString(request.hostName());
+            }
             g.writeEndObject();
         }
         return out.toString();
