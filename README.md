@@ -6,7 +6,7 @@ An SSH agent whose keys live on your phone: every signature is approved, and mad
   sign requests are rendered to HTML on the server and pushed over Server-Sent Events (and, with the
   card included, Web Push); a small `app.js` adds them to the page. No JS library; the service worker keeps the
   page's files so the app opens fast on a bad connection.
-- `cli/` — plain Java 25 client (no Spring, also builds as a GraalVM native executable): the agent itself, plus account setup, enrolment and
+- `cli/` — plain Java 21 client (no Spring, also builds as a GraalVM native executable): the agent itself, plus account setup, enrolment and
   key listing, talking to the server's `/api` endpoints.
 
 The server hosts any number of accounts. Each has its own passkeys, SSH keys, sign requests and computers.
@@ -15,7 +15,7 @@ Public URL: https://ssha.apps.maykelange.com/ (load balancer → this machine:90
 
 ## Build
 
-Requires JDK 25 (Spring Boot 4.1). `mise.toml` pins Temurin 25 for this directory; the build
+Requires JDK 21+ (Spring Boot 4.1). `mise.toml` pins Temurin 21 for this directory; the build
 fails fast with a clear message on an older JDK.
 
     mvn package
@@ -38,7 +38,7 @@ server) keeps its token and agent socket in `~/.config/ssha` (`$XDG_CONFIG_HOME/
 ## Deploy with Docker
 
 No image to build or registry needed: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) runs the jar in the
-stock `eclipse-temurin:25-jre` image, with the jar and the data in folders on the host. Caddy terminates HTTPS and
+stock `eclipse-temurin:21-jre` image, with the jar and the data in folders on the host. Caddy terminates HTTPS and
 forwards to it ([`deploy/Caddyfile`](deploy/Caddyfile)).
 
 1. On the host, create a folder with subfolders `app` and `data`.

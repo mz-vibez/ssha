@@ -1,6 +1,6 @@
 [tools]
 # Temurin is the default JDK here; GraalVM is only used to build the native CLI (`mise run native`).
-java = ["temurin-25", "graalvm-community-25.0.2"]
+java = ["temurin-21", "graalvm-community-25.0.2"]
 
 [tasks.native]
 description = "Build the CLI as a native executable: cli/target/ssha-cli"

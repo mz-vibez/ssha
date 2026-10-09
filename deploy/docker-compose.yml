@@ -11,7 +11,7 @@
 # Edit the values marked EDIT, then `docker compose up -d` in that folder.
 services:
   ssha:
-    image: eclipse-temurin:25-jre
+    image: eclipse-temurin:21-jre
     container_name: ssha
     restart: unless-stopped
     # EDIT: the host user that owns ./data (`id -u`:`id -g`).
