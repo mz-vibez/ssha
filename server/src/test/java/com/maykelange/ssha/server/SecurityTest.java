@@ -42,6 +42,8 @@ class SecurityTest {
     Accounts accounts;
     @Autowired
     RateLimits limits;
+    @Autowired
+    ActivityLog activity;
 
     String account;
     String bearer;
@@ -52,6 +54,38 @@ class SecurityTest {
         Accounts.Enrolled enrolled = accounts.create("laptop");
         account = enrolled.accountId();
         bearer = "Bearer " + enrolled.token();
+    }
+
+    @Test
+    void signupAndSignOutAreInTheConnectionLog() throws Exception {
+        MvcResult signup = mvc.perform(post("/signup").with(csrf()).header("User-Agent", "TestPhone/1.0"))
+                .andExpect(status().isFound()).andReturn();
+        MockHttpSession session = (MockHttpSession) signup.getRequest().getSession();
+        String id = jdbcAccountOf(session);
+        mvc.perform(post("/logout").session(session).with(csrf())).andExpect(status().isFound());
+        assertThat(activity.recent(id, ActivityLog.WEB, 10)).extracting(ActivityLog.Entry::event)
+                .containsExactly("signed out", "created the account");
+        assertThat(activity.recent(id, ActivityLog.WEB, 10).get(1).source()).contains("TestPhone/1.0");
+        mvc.perform(get("/activity").with(user(id))).andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("signed out")));
+    }
+
+    @Autowired
+    org.springframework.security.authentication.ott.OneTimeTokenService oneTimeTokens;
+
+    @Test
+    void linkSignInIsInTheConnectionLog() throws Exception {
+        var token = oneTimeTokens.generate(new org.springframework.security.authentication.ott.GenerateOneTimeTokenRequest(account));
+        mvc.perform(post("/login/ott").with(csrf()).param("token", token.getTokenValue()))
+                .andExpect(status().isFound());
+        assertThat(activity.recent(account, ActivityLog.WEB, 10)).extracting(ActivityLog.Entry::event)
+                .containsExactly("signed in with a link");
+    }
+
+    private String jdbcAccountOf(MockHttpSession session) {
+        var context = (org.springframework.security.core.context.SecurityContext) session
+                .getAttribute("SPRING_SECURITY_CONTEXT");
+        return context.getAuthentication().getName();
     }
 
     // --- web: anonymous access ---------------------------------------------------------------

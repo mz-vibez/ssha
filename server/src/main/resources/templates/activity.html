@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/head :: meta('ssha · activity')}"></th:block>
+</head>
+<body class="page">
+<main class="card" th:with="zone=${T(java.time.ZoneId).systemDefault()}">
+    <p><a href="/">← Sign requests</a></p>
+    <h1>Activity</h1>
+
+    <h2>Sign requests</h2>
+    <p class="notice" th:if="${signs.isEmpty()}">No sign request has been answered yet.</p>
+    <ul class="passkeys" th:unless="${signs.isEmpty()}">
+        <li th:each="e : ${signs}">
+            <div>
+                <strong th:text="${e.event}">approved</strong>
+                <span th:text="${e.detail}">SSH login as root on SHA256:… with key phone</span>
+                <div class="hint">
+                    <span th:text="${#temporals.format(e.at.atZone(zone), 'yyyy-MM-dd HH:mm:ss')}">2026-10-01 12:00:00</span>
+                    from <span th:text="${e.source}">laptop</span>
+                </div>
+            </div>
+        </li>
+    </ul>
+
+    <h2>Web sign-ins</h2>
+    <p class="notice" th:if="${webs.isEmpty()}">Nothing yet.</p>
+    <ul class="passkeys" th:unless="${webs.isEmpty()}">
+        <li th:each="e : ${webs}">
+            <div>
+                <strong th:text="${e.event}">signed in with a passkey</strong>
+                <div class="hint">
+                    <span th:text="${#temporals.format(e.at.atZone(zone), 'yyyy-MM-dd HH:mm:ss')}">2026-10-01 12:00:00</span>
+                    <th:block th:if="${e.source}">from <span th:text="${e.source}">203.0.113.5 · Safari</span></th:block>
+                </div>
+            </div>
+        </li>
+    </ul>
+</main>
+</body>
+</html>

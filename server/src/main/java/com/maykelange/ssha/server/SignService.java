@@ -10,6 +10,7 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Service;
@@ -85,15 +86,17 @@ public class SignService {
     private final PushService push;
     private final KnownHosts knownHosts;
     private final RateLimits limits;
+    private final ActivityLog activity;
 
     public SignService(StreamHub streams, TemplateEngine templates, SshaProperties props, PushService push,
-                       KnownHosts knownHosts, RateLimits limits) {
+                       KnownHosts knownHosts, RateLimits limits, ActivityLog activity) {
         this.streams = streams;
         this.templates = templates;
         this.props = props;
         this.push = push;
         this.knownHosts = knownHosts;
         this.limits = limits;
+        this.activity = activity;
         // A page that (re)connects gets every request of its account that is still waiting.
         streams.onConnect((account, emitter) -> pending(account).forEach(p -> streams.send(emitter, "sign", render(p))));
     }
@@ -133,6 +136,7 @@ public class SignService {
         pending.put(p.id(), p);
         p.result().orTimeout(props.signTimeout().toMillis(), TimeUnit.MILLISECONDS).whenComplete((sig, err) -> {
             pending.remove(p.id());
+            logOutcome(p, err);
             streams.broadcast(key.accountId(), "sign", "<div id=\"sign-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
         });
         streams.broadcast(key.accountId(), "sign", render(p));
@@ -170,6 +174,29 @@ public class SignService {
             throw new NoSuchElementException("no such request (answered or expired)");
         }
         return p;
+    }
+
+    private void logOutcome(Pending p, Throwable err) {
+        String event = err == null ? "approved"
+                : err instanceof DeniedException ? "denied"
+                : err instanceof TimeoutException ? "expired"
+                : "cancelled";
+        SignDetails d = p.details();
+        StringBuilder detail = new StringBuilder(d.kind());
+        if (d.user() != null) {
+            detail.append(" as ").append(d.user());
+        }
+        if (d.hostKey() != null) {
+            detail.append(" on ").append(d.hostKey()).append(d.hostVerified() ? "" : " (unverified)");
+        }
+        if (d.namespace() != null) {
+            detail.append(" (").append(d.namespace()).append(')');
+        }
+        if (d.forwarded()) {
+            detail.append(", forwarded agent");
+        }
+        detail.append(" with key ").append(p.key().label());
+        activity.record(p.key().accountId(), ActivityLog.SIGN, event, detail.toString(), p.client().name());
     }
 
     private PushService.Notification notification(Pending p) {

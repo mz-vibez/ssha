@@ -142,6 +142,13 @@ Things to know:
   copies a key while it's unlocked. Fine for a self-hosted server; a hardware key is stronger. No other code runs
   there: htmx is served from the jar (webjars), and a Content-Security-Policy allows only the server's own scripts.
 
+## Activity
+
+The phone's **Activity** page lists how each sign request ended (approved, denied, expired or cancelled, with the
+computer, key, remote user and host) and a connection log of the browser: account creation, passkey and
+sign-in-link logins, sign-outs and deleted passkeys, each with the address and user agent. The newest 1000
+entries per account are kept.
+
 ## Phone app
 
 The phone pages are a PWA: install it with *Add to Home Screen* (iOS: Share menu; Android Chrome: menu → *Install

@@ -54,6 +54,8 @@ class SshSignTest {
     @Autowired
     Accounts accounts;
     @Autowired
+    ActivityLog activity;
+    @Autowired
     RateLimits limits;
     @Autowired
     org.thymeleaf.TemplateEngine templates;
@@ -178,6 +180,22 @@ class SshSignTest {
         byte[] signature = Base64.getDecoder().decode((String) JsonPath.read(body, "$.signature"));
         assertThat(SshWire.verify(publicBlob, data, signature)).isTrue();
         assertThat(signs.pending(account)).isEmpty();
+        assertThat(activity.recent(account, ActivityLog.SIGN, 10)).singleElement().satisfies(e -> {
+            assertThat(e.event()).isEqualTo("approved");
+            assertThat(e.source()).isEqualTo("laptop");
+            assertThat(e.detail()).contains("Unknown data").contains("phone");
+        });
+    }
+
+    @Test
+    void deniedRequestsAreLoggedAndShownOnTheActivityPage() throws Exception {
+        MvcResult pending = startSign("data".getBytes(StandardCharsets.UTF_8), null);
+        signs.deny(account, onlyPending().id());
+        mvc.perform(asyncDispatch(pending)).andExpect(status().isForbidden());
+        assertThat(activity.recent(account, ActivityLog.SIGN, 10)).singleElement()
+                .satisfies(e -> assertThat(e.event()).isEqualTo("denied"));
+        mvc.perform(get("/activity").with(user(account))).andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("denied")));
     }
 
     @Test
