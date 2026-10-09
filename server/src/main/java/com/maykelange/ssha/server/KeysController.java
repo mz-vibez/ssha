@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 /**
  * The phone's side of the SSH agent: managing its keys and answering sign requests. Keys are
  * generated and used in the browser (ssh.js); the server only ever sees public keys and signatures.
@@ -82,9 +84,11 @@ public class KeysController {
     /** @param signature the raw signature, base64url */
     @PostMapping("/sign/{id}/approve")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void approve(@PathVariable String id, @RequestParam String signature, Principal principal) {
+    public void approve(@PathVariable String id, @RequestParam String signature, Principal principal,
+                        HttpServletRequest request) {
         try {
-            signs.approve(principal.getName(), id, Base64.getUrlDecoder().decode(signature));
+            signs.approve(principal.getName(), id, Base64.getUrlDecoder().decode(signature),
+                    ActivityLog.describe(request));
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         } catch (IllegalArgumentException e) {
@@ -94,9 +98,9 @@ public class KeysController {
 
     @PostMapping("/sign/{id}/deny")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deny(@PathVariable String id, Principal principal) {
+    public void deny(@PathVariable String id, Principal principal, HttpServletRequest request) {
         try {
-            signs.deny(principal.getName(), id);
+            signs.deny(principal.getName(), id, ActivityLog.describe(request));
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }

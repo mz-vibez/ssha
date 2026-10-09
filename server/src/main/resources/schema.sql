@@ -84,3 +84,17 @@ create table if not exists known_hosts
     logins      int          not null,
     primary key (account_id, fingerprint)
 );
+
+-- What happened on the account: how each sign request ended ('sign') and how the phone's browser
+-- got in or out ('web'). Newest 1000 rows per account are kept.
+create table if not exists activity
+(
+    id         bigint auto_increment primary key,
+    account_id varchar(64)   not null,
+    at         timestamp     not null,
+    category   varchar(10)   not null,
+    event      varchar(40)   not null,
+    detail     varchar(500),
+    source     varchar(300)
+);
+create index if not exists activity_account on activity (account_id, id);

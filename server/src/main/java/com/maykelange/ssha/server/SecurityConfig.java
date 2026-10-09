@@ -70,8 +70,8 @@ public class SecurityConfig {
 
     @Bean
     @Order(2)
-    SecurityFilterChain webChain(HttpSecurity http, SshaProperties props, OneTimeTokenService oneTimeTokens)
-            throws Exception {
+    SecurityFilterChain webChain(HttpSecurity http, SshaProperties props, OneTimeTokenService oneTimeTokens,
+                                 ActivityLog activity) throws Exception {
         http.authorizeHttpRequests(a -> a
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/login", "/login/ott", "/app.css", "/webauthn.js", "/favicon.ico", "/error")
@@ -101,7 +101,12 @@ public class SecurityConfig {
                 // Sign-in always ends on the start page: a saved request would send the phone to whatever file
                 // was refused last, e.g. /app.js fetched by the service worker while signed out.
                 .requestCache(c -> c.disable())
-                .logout(l -> l.logoutSuccessUrl("/login?logout"))
+                .logout(l -> l.logoutSuccessUrl("/login?logout")
+                        .addLogoutHandler((req, res, auth) -> {
+                            if (auth != null) {
+                                activity.web(auth.getName(), "signed out", null, req);
+                            }
+                        }))
                 .headers(h -> h.contentSecurityPolicy(c -> c.policyDirectives(CONTENT_SECURITY_POLICY)))
                 .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint()));
         return http.build();

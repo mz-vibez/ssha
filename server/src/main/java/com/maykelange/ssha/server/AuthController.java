@@ -41,17 +41,20 @@ public class AuthController {
     private final UserDetailsService users;
     private final SshaProperties props;
     private final RateLimits limits;
+    private final ActivityLog activity;
     private final SecurityContextHolderStrategy contexts = SecurityContextHolder.getContextHolderStrategy();
     private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();
 
     public AuthController(PublicKeyCredentialUserEntityRepository userEntities, UserCredentialRepository credentials,
-                          Accounts accounts, UserDetailsService users, SshaProperties props, RateLimits limits) {
+                          Accounts accounts, UserDetailsService users, SshaProperties props, RateLimits limits,
+                          ActivityLog activity) {
         this.userEntities = userEntities;
         this.credentials = credentials;
         this.accounts = accounts;
         this.users = users;
         this.props = props;
         this.limits = limits;
+        this.activity = activity;
     }
 
     @GetMapping("/login")
@@ -82,6 +85,7 @@ public class AuthController {
             request.changeSessionId();
         }
         contextRepository.saveContext(context, request, response);
+        activity.web(user.getUsername(), "created the account", null, request);
         return "redirect:/passkeys?new";
     }
 
@@ -102,13 +106,14 @@ public class AuthController {
     }
 
     @PostMapping("/passkeys/{id}/delete")
-    public String delete(@PathVariable String id, Principal principal) {
+    public String delete(@PathVariable String id, Principal principal, HttpServletRequest request) {
         Bytes credentialId = Bytes.fromBase64(id);
         boolean owned = passkeysOf(principal).stream().anyMatch(c -> c.getCredentialId().equals(credentialId));
         if (!owned) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         }
         credentials.delete(credentialId);
+        activity.web(principal.getName(), "deleted a passkey", null, request);
         return "redirect:/passkeys";
     }
 
