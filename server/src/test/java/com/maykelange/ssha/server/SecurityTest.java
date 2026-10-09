@@ -105,6 +105,13 @@ class SecurityTest {
     }
 
     @Test
+    void refusedFilesAreNotRememberedAsTheSignInTarget() throws Exception {
+        var session = mvc.perform(get("/app.js")).andExpect(status().is3xxRedirection())
+                .andReturn().getRequest().getSession(false);
+        assertThat(session == null || session.getAttribute("SPRING_SECURITY_SAVED_REQUEST") == null).isTrue();
+    }
+
+    @Test
     void pagesOnlyRunTheServersOwnScripts() throws Exception {
         mvc.perform(get("/").with(user(account)))
                 .andExpect(header().string("Content-Security-Policy", SecurityConfig.CONTENT_SECURITY_POLICY))
