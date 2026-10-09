@@ -45,16 +45,29 @@ public class SignService {
     /**
      * @param algorithm  SSH signature algorithm, e.g. ssh-ed25519 or rsa-sha2-512
      * @param client     the computer asking, as stored when it joined
+     * @param hostName   the host's name as the computer reported it (unverified); null if unknown
      * @param host       earlier logins to this (verified) host; null if none, or not a verified login
      * @param concurrent whether other requests of the account were waiting when this one came in
      */
     public record Pending(String id, SshKey key, byte[] data, String algorithm, SignDetails details,
-                          Accounts.Client client, KnownHosts.Seen host, boolean concurrent, Instant requestedAt,
+                          Accounts.Client client, String hostName, KnownHosts.Seen host, boolean concurrent, Instant requestedAt,
                           CompletableFuture<byte[]> result) {
 
         /** A verified login to a host the account never approved a login to. */
         public boolean newHost() {
             return details.hostVerified() && host == null;
+        }
+
+        /**
+         * What to call the host: its name if the computer knew one, else the start of its key fingerprint;
+         * null if the request names no host (a signature, or ssh didn't bind the connection).
+         */
+        public String hostLabel() {
+            if (hostName != null) {
+                return hostName;
+            }
+            String fp = details.hostKey();
+            return fp == null ? null : fp.length() > 20 ? fp.substring(0, 20) + "…" : fp;
         }
 
         /** The bytes to sign, for the phone. */
@@ -120,8 +133,14 @@ public class SignService {
      * @throws IllegalStateException    if the computer or account has too many requests waiting, or the
      *                                  computer sent too many lately
      */
+    public CompletableFuture<byte[]> request(SshKey key, byte[] data, int flags, Binding binding,
+                                             Accounts.Client client) {
+        return request(key, data, flags, binding, null, client);
+    }
+
+    /** @param hostName the host's name as the computer knows it, if it does; only shown, never trusted */
     public synchronized CompletableFuture<byte[]> request(SshKey key, byte[] data, int flags, Binding binding,
-                                                          Accounts.Client client) {
+                                                          String hostName, Accounts.Client client) {
         if (!client.accountId().equals(key.accountId())) {
             throw new IllegalArgumentException("the key belongs to another account");
         }
@@ -141,7 +160,7 @@ public class SignService {
         byte[] id = new byte[16];
         RANDOM.nextBytes(id);
         Pending p = new Pending(Base64.getUrlEncoder().withoutPadding().encodeToString(id), key, data.clone(),
-                algorithm, details, client, host, !waiting.isEmpty(), Instant.now(), new CompletableFuture<>());
+                algorithm, details, client, details.hostKey() == null ? null : hostName, host, !waiting.isEmpty(), Instant.now(), new CompletableFuture<>());
         approved.values().removeIf(a -> a.at().isBefore(Instant.now().minus(APPROVED_MEMORY)));
         pending.put(p.id(), p);
         p.result().orTimeout(props.signTimeout().toMillis(), TimeUnit.MILLISECONDS).whenComplete((sig, err) -> {
@@ -251,7 +270,12 @@ public class SignService {
         if (d.user() != null) {
             body.append(" as ").append(d.user());
         }
-        if (p.newHost()) {
+        if (p.hostLabel() != null) {
+            body.append(" on ").append(p.hostLabel());
+            if (p.newHost()) {
+                body.append(", a host you never logged in to");
+            }
+        } else if (p.newHost()) {
             body.append(" on a host you never logged in to");
         }
         if (d.namespace() != null) {

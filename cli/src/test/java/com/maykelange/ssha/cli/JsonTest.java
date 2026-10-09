@@ -67,6 +67,13 @@ class JsonTest {
     }
 
     @Test
+    void writesTheHostNameWhenKnown() {
+        assertThat(Json.signRequest(new SshaCli.SignRequest(new byte[] {1}, new byte[] {2}, 0, null, "example.com")))
+                .isEqualTo("{\"publicKey\":\"AQ==\",\"data\":\"Ag==\",\"flags\":0,\"binding\":null,"
+                        + "\"hostName\":\"example.com\"}");
+    }
+
+    @Test
     void badResponsesBecomeIoExceptions() {
         assertThatThrownBy(() -> Json.agentKeys("<html>502 Bad Gateway</html>")).isInstanceOf(IOException.class);
         assertThatThrownBy(() -> Json.agentKeys("{\"error\":\"x\"}")).isInstanceOf(IOException.class);

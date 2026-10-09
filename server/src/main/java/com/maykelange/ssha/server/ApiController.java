@@ -198,8 +198,9 @@ public class ApiController {
      * @param publicKey SSH public key blob of the key to sign with
      * @param data      the bytes ssh wants signed
      * @param binding   the agent connection's session binding, if ssh sent one
+     * @param hostName  the host's name as the computer knows it (from its known_hosts), if any; unverified
      */
-    public record SignRequest(byte[] publicKey, byte[] data, int flags, SignService.Binding binding) {
+    public record SignRequest(byte[] publicKey, byte[] data, int flags, SignService.Binding binding, String hostName) {
     }
 
     public record SignResponse(byte[] signature) {
@@ -223,7 +224,8 @@ public class ApiController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown key"));
         CompletableFuture<byte[]> result;
         try {
-            result = signs.request(key, request.data(), request.flags(), request.binding(), caller.client());
+            result = signs.request(key, request.data(), request.flags(), request.binding(),
+                    clientName(request.hostName(), null), caller.client());
         } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
         }
@@ -250,9 +252,13 @@ public class ApiController {
     }
 
     private static String clientName(String name) {
+        return clientName(name, "cli");
+    }
+
+    private static String clientName(String name, String fallback) {
         String client = name == null ? "" : name.strip().replaceAll("\\p{Cntrl}", "");
         if (client.isEmpty()) {
-            return "cli";
+            return fallback;
         }
         return client.length() > 100 ? client.substring(0, 100) : client;
     }
