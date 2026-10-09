@@ -82,6 +82,39 @@ class SecurityTest {
                 .containsExactly("signed in with a link");
     }
 
+    @Autowired
+    BrowserSessions browsers;
+
+    @Test
+    void signedInBrowsersAreListedAndCanBeSignedOutOneByOne() throws Exception {
+        MockHttpSession phone = new MockHttpSession(null, "phone-session-cookie-value");
+        MockHttpSession desktop = new MockHttpSession();
+        mvc.perform(get("/activity").session(phone).with(user(account)).header("User-Agent", "Phone/1"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/activity").session(desktop).with(user(account)).header("User-Agent", "Desktop/2"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Phone/1")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("(this browser)")))
+                // the session id is the cookie: it must never be on the page
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(phone.getId()))));
+        var list = browsers.of(account, desktop.getId());
+        assertThat(list).hasSize(2);
+        String phoneHandle = list.stream().filter(b -> b.label().contains("Phone/1")).findFirst().orElseThrow().handle();
+
+        // another account can't sign it out
+        Accounts.Enrolled other = accounts.create("other");
+        mvc.perform(post("/browsers/signout").session(desktop).with(user(other.accountId())).with(csrf())
+                .param("handle", phoneHandle)).andExpect(status().isNotFound());
+        assertThat(phone.isInvalid()).isFalse();
+
+        mvc.perform(post("/browsers/signout").session(desktop).with(user(account)).with(csrf())
+                .param("handle", phoneHandle)).andExpect(status().isFound());
+        assertThat(phone.isInvalid()).isTrue();
+        assertThat(desktop.isInvalid()).isFalse();
+        assertThat(browsers.of(account, desktop.getId())).hasSize(1);
+        assertThat(activity.recent(account, ActivityLog.WEB, 5).get(0).event()).isEqualTo("signed a browser out");
+    }
+
     private String jdbcAccountOf(MockHttpSession session) {
         var context = (org.springframework.security.core.context.SecurityContext) session
                 .getAttribute("SPRING_SECURITY_CONTEXT");

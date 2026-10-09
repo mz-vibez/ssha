@@ -80,6 +80,8 @@ public class SignService {
     }
 
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
+    /** Which browser answered a request, until its outcome is logged. */
+    private final Map<String, String> answeredBy = new ConcurrentHashMap<>();
     private final StreamHub streams;
     private final TemplateEngine templates;
     private final SshaProperties props;
@@ -146,18 +148,30 @@ public class SignService {
 
     /** @param signature the raw signature made on the phone (Ed25519, or RSASSA-PKCS1-v1_5) */
     public void approve(String accountId, String id, byte[] signature) {
+        approve(accountId, id, signature, null);
+    }
+
+    /** @param browser who answered, for the activity log */
+    public void approve(String accountId, String id, byte[] signature, String browser) {
         Pending p = find(accountId, id);
         byte[] blob = SshWire.signatureBlob(p.algorithm(), signature);
         if (!SshWire.verify(p.key().publicKey(), p.data(), blob)) {
             throw new IllegalArgumentException("the signature does not match the key");
         }
+        answered(p, browser);
         if (p.result().complete(blob) && p.details().hostVerified()) {
             knownHosts.login(accountId, p.details().hostKey());
         }
     }
 
     public void deny(String accountId, String id) {
-        find(accountId, id).result().completeExceptionally(new DeniedException());
+        deny(accountId, id, null);
+    }
+
+    public void deny(String accountId, String id, String browser) {
+        Pending p = find(accountId, id);
+        answered(p, browser);
+        p.result().completeExceptionally(new DeniedException());
     }
 
     public List<Pending> pending(String accountId) {
@@ -174,6 +188,12 @@ public class SignService {
             throw new NoSuchElementException("no such request (answered or expired)");
         }
         return p;
+    }
+
+    private void answered(Pending p, String browser) {
+        if (browser != null) {
+            answeredBy.putIfAbsent(p.id(), browser);
+        }
     }
 
     private void logOutcome(Pending p, Throwable err) {
@@ -196,6 +216,10 @@ public class SignService {
             detail.append(", forwarded agent");
         }
         detail.append(" with key ").append(p.key().label());
+        String browser = answeredBy.remove(p.id());
+        if (browser != null) {
+            detail.append(", answered from ").append(browser);
+        }
         activity.record(p.key().accountId(), ActivityLog.SIGN, event, detail.toString(), p.client().name());
     }
 

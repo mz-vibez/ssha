@@ -147,7 +147,10 @@ Things to know:
 The phone's **Activity** page lists how each sign request ended (approved, denied, expired or cancelled, with the
 computer, key, remote user and host) and a connection log of the browser: account creation, passkey and
 sign-in-link logins, sign-outs and deleted passkeys, each with the address and user agent. The newest 1000
-entries per account are kept.
+entries per account are kept. Each sign request also records which browser approved or denied it.
+
+The page lists the browsers signed in right now (address, user agent, last activity) with a **Sign out** button for
+each. That list is in memory, like the sessions themselves, so it empties on a server restart.
 
 ## Phone app
 

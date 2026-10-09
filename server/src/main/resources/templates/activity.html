@@ -8,6 +8,26 @@
     <p><a href="/">← Sign requests</a></p>
     <h1>Activity</h1>
 
+    <h2>Signed-in browsers</h2>
+    <p class="notice" th:if="${browsers.isEmpty()}">No browser has been seen since the server started.</p>
+    <ul class="passkeys" th:unless="${browsers.isEmpty()}">
+        <li th:each="b : ${browsers}">
+            <div>
+                <strong th:text="${b.label}">203.0.113.5 · Safari</strong>
+                <span class="hint" th:if="${b.current}">(this browser)</span>
+                <div class="hint">
+                    signed in <span th:text="${#temporals.format(b.since.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span>,
+                    last active <span th:text="${#temporals.format(b.lastSeen.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span>
+                </div>
+            </div>
+            <form method="post" th:action="@{/browsers/signout}"
+                  th:data-confirm="${b.current} ? 'Sign this browser out?' : 'Sign that browser out?'">
+                <input type="hidden" name="handle" th:value="${b.handle}">
+                <button type="submit" class="danger">Sign out</button>
+            </form>
+        </li>
+    </ul>
+
     <h2>Sign requests</h2>
     <p class="notice" th:if="${signs.isEmpty()}">No sign request has been answered yet.</p>
     <ul class="passkeys" th:unless="${signs.isEmpty()}">

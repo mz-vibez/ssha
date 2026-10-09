@@ -171,6 +171,7 @@ class SshSignTest {
         String id = onlyPending().id();
 
         mvc.perform(post("/sign/" + id + "/approve").with(user(account)).with(csrf())
+                        .header("User-Agent", "Phone/1")
                         .param("signature", B64URL.encodeToString(sign(phoneKey.getPrivate(), "Ed25519", data))))
                 .andExpect(status().isNoContent());
 
@@ -183,7 +184,7 @@ class SshSignTest {
         assertThat(activity.recent(account, ActivityLog.SIGN, 10)).singleElement().satisfies(e -> {
             assertThat(e.event()).isEqualTo("approved");
             assertThat(e.source()).isEqualTo("laptop");
-            assertThat(e.detail()).contains("Unknown data").contains("phone");
+            assertThat(e.detail()).contains("Unknown data").contains("phone").contains("answered from").contains("Phone/1");
         });
     }
 
