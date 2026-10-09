@@ -73,7 +73,7 @@ A downloaded CLI keeps its token in `~/.config/ssha`.
     java -jar cli/target/ssha-cli.jar                 # first run: create an account (see Accounts below)
     java -jar cli/target/ssha-cli.jar --account ID    # first run on another computer: join account ID
     java -jar cli/target/ssha-cli.jar enroll          # QR code + one-time link to add a passkey on the phone
-    java -jar cli/target/ssha-cli.jar agent           # ssh-agent backed by the phone (see below)
+    java -jar cli/target/ssha-cli.jar agent           # shell with an ssh-agent backed by the phone (see below)
     java -jar cli/target/ssha-cli.jar keys            # the phone's SSH public keys as authorized_keys lines
 
 The CLI targets the public URL by default; override with `--url http://localhost:9091` or `$SSHA_URL`.
@@ -117,8 +117,11 @@ The phone holds the SSH keys; the computer only gets signatures, and each one ne
    - ECDSA and DSA keys are not supported.
 2. Put its line (shown on the page, or `ssha-cli keys`) in `~/.ssh/authorized_keys` on a server, or add it
    to GitHub.
-3. Run `ssha-cli agent` and use the socket it prints, e.g. `export SSH_AUTH_SOCK=<project>/data/agent.sock`
-   (or `IdentityAgent` in `~/.ssh/config`).
+3. Run `ssha-cli agent` to get a shell (your `$SHELL`) with `SSH_AUTH_SOCK` pointing at the phone-backed agent,
+   or `ssha-cli agent CMD [ARG...]` to run one command that way, like `ssh-agent CMD`. The agent stops, and its
+   socket is removed, when the command exits; `ssha-cli` exits with the command's exit code.
+   To keep an agent running on its own instead, use `ssha-cli agent --daemon` and the socket it prints, e.g.
+   `export SSH_AUTH_SOCK=<project>/data/agent.sock` (or `IdentityAgent` in `~/.ssh/config`).
 4. When ssh needs a signature, the start page shows a card: key, remote user, host key fingerprint (marked
    *verified* when OpenSSH's session binding proves it, with *first login to this host* or how many logins you
    approved to it before), and the computer asking, by the name it joined with (it can't rename itself). A login

@@ -21,6 +21,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.EncodeHintType;
@@ -36,7 +37,8 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
  * <pre>
  *   ssha-cli                 set this computer up (see below) and show its account
  *   ssha-cli enroll          print a one-time sign-in link + QR code for adding a passkey on the phone
- *   ssha-cli agent           run an ssh-agent whose keys live on the phone (each use approved there)
+ *   ssha-cli agent [CMD...]  run CMD (default $SHELL) with an ssh-agent whose keys live on the phone; exits with CMD
+ *   ssha-cli agent --daemon  run that agent on its own until stopped (each use approved on the phone)
  *   ssha-cli keys            print the phone's SSH public keys as authorized_keys lines
  * </pre>
  *
@@ -160,6 +162,7 @@ public final class SshaCli {
             i += 2;
         }
         String command = i < args.length ? args[i] : "";
+        List<String> rest = i < args.length ? List.of(args).subList(i + 1, args.length) : List.of();
         if (command.equals("-h") || command.equals("--help") || command.equals("help")) {
             usage();
             return;
@@ -185,7 +188,18 @@ public final class SshaCli {
         switch (command) {
             case "" -> System.exit(setUp || cli.printAccount() ? 0 : 1);
             case "enroll" -> System.exit(cli.enroll() ? 0 : 1);
-            case "agent" -> cli.agent();
+            case "agent" -> {
+                boolean daemon = !rest.isEmpty() && (rest.get(0).equals("-d") || rest.get(0).equals("--daemon"));
+                if (daemon && rest.size() > 1) {
+                    usage();
+                    System.exit(2);
+                }
+                if (daemon) {
+                    cli.agent();
+                } else {
+                    System.exit(cli.agent(rest));
+                }
+            }
             case "keys" -> System.exit(cli.printKeys() ? 0 : 1);
             default -> throw new IllegalStateException(command);
         }
@@ -193,11 +207,14 @@ public final class SshaCli {
 
     private static void usage() {
         System.out.println("""
-                usage: ssha-cli [--url URL] [--account ID] [enroll | agent | keys]
+                usage: ssha-cli [--url URL] [--account ID] [enroll | agent [-d | CMD [ARG...]] | keys]
                   (none)  set this computer up if needed, and show its account
                   enroll  one-time sign-in link + QR code to add a passkey on your phone
-                  agent   ssh-agent backed by the phone: listens on %s,
-                          every signature must be approved on the phone
+                  agent   run CMD (default: $SHELL) with SSH_AUTH_SOCK pointing at an ssh-agent backed by
+                          the phone, like `ssh-agent CMD`; the agent stops when CMD exits, with its exit code.
+                          Every signature must be approved on the phone.
+                  agent -d
+                          run just the agent, listening on %s, until stopped
                   keys    the phone's SSH public keys, as authorized_keys lines
                 Without an API token, ssha-cli first creates a new account, or with --account ID
                 (or $SSHA_ACCOUNT) asks to join that account, which you accept on its phone.
@@ -379,8 +396,8 @@ public final class SshaCli {
     /** Key labels by public key (hex), for log lines. */
     private final Map<String, String> keyLabels = new ConcurrentHashMap<>();
 
-    private void agent() throws IOException {
-        SshAgent agent = new SshAgent(new SshAgent.Phone() {
+    private SshAgent phoneAgent() {
+        return new SshAgent(new SshAgent.Phone() {
             @Override
             public List<SshAgent.Identity> identities() throws IOException, InterruptedException {
                 return fetchKeys().stream()
@@ -394,12 +411,57 @@ public final class SshaCli {
                 return requestSignature(new SignRequest(publicKey, data, flags, binding));
             }
         });
-        agent.serve(AGENT_SOCKET, () -> {
+    }
+
+    /** Daemon mode: the agent alone, on the fixed socket, until the process is stopped. */
+    private void agent() throws IOException {
+        phoneAgent().serve(AGENT_SOCKET, () -> {
             // Same shape as ssh-agent's output, so `eval` works on it.
             System.out.println("SSH_AUTH_SOCK=" + AGENT_SOCKET + "; export SSH_AUTH_SOCK;");
             System.out.flush();
             log("agent ready; sign requests go to " + base + " for approval. Ctrl-C to stop.");
         });
+    }
+
+    /**
+     * Runs {@code command} (default: $SHELL, else /bin/sh) with SSH_AUTH_SOCK set to a private agent
+     * socket, like {@code ssh-agent command}; the agent goes away with the command.
+     *
+     * @return the command's exit code (127 if it can't be started)
+     */
+    private int agent(List<String> command) throws IOException, InterruptedException {
+        if (command.isEmpty()) {
+            String shell = System.getenv("SHELL");
+            command = List.of(shell != null && !shell.isBlank() ? shell : "/bin/sh");
+        }
+        // One socket per run, so several shells can each have their own agent.
+        Path socket = dataDir().resolve("agent-" + ProcessHandle.current().pid() + ".sock");
+        SshAgent agent = phoneAgent();
+        CountDownLatch ready = new CountDownLatch(1);
+        Thread server = new Thread(() -> {
+            try {
+                agent.serve(socket, ready::countDown);
+            } catch (IOException e) {
+                System.err.println("agent failed: " + e.getMessage());
+                System.exit(1);
+            }
+        }, "agent-server");
+        server.setDaemon(true);
+        server.start();
+        ready.await();
+
+        ProcessBuilder builder = new ProcessBuilder(command).inheritIO();
+        builder.environment().put("SSH_AUTH_SOCK", socket.toString());
+        builder.environment().remove("SSH_AGENT_PID");
+        int code;
+        try {
+            code = builder.start().waitFor();
+        } catch (IOException e) {
+            System.err.println("couldn't run " + command.get(0) + ": " + e.getMessage());
+            code = 127;
+        }
+        Files.deleteIfExists(socket);
+        return code;
     }
 
     private List<AgentKey> fetchKeys() throws IOException, InterruptedException {
