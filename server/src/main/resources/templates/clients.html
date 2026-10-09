@@ -3,10 +3,11 @@
 <head>
     <th:block th:replace="~{fragments/head :: meta('ssha · computers')}"></th:block>
 </head>
-<body class="page">
-<main class="card">
-    <p><a href="/">← Sign requests</a></p>
-    <h1>Computers</h1>
+<body>
+<th:block th:replace="~{fragments/nav :: nav('clients')}"></th:block>
+<main class="wrap">
+<div class="col">
+    <h2>Computers</h2>
 
     <p class="notice" th:if="${clients.isEmpty()}">No computer can use this account.</p>
     <ul class="passkeys" th:unless="${clients.isEmpty()}">
@@ -14,8 +15,8 @@
             <div>
                 <strong th:text="${c.name}">laptop</strong>
                 <div class="hint">
-                    added <span th:text="${#temporals.format(c.created.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span><th:block th:if="${c.lastUsed}">,
-                    last used <span th:text="${#temporals.format(c.lastUsed.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span></th:block>
+                    added <span th:text="${#temporals.format(c.created.atZone(zone), 'MMM d, yyyy')}">2026-10-01 12:00</span><th:block th:if="${c.lastUsed}">,
+                    last used <span th:text="${#temporals.format(c.lastUsed.atZone(zone), 'MMM d, yyyy')}">2026-10-01 12:00</span></th:block>
                 </div>
             </div>
             <form method="post" th:action="@{/clients/{id}/delete(id=${c.id})}"
@@ -25,9 +26,11 @@
         </li>
     </ul>
 
+</div>
+<div class="col">
     <h2 id="add">Add a computer</h2>
     <th:block th:unless="${download}">
-        <p class="hint">Run this on the other computer, then accept its request on the start page:</p>
+        <p class="hint">Run this on the other computer, then accept its request on the Requests page:</p>
         <textarea class="pubkey" readonly rows="2" aria-label="Command"
                   th:text="|ssha-cli --account ${account}|">ssha-cli --account …</textarea>
     </th:block>
@@ -42,7 +45,7 @@
         <p class="hint">or from its terminal:</p>
         <textarea class="pubkey" readonly rows="2" aria-label="Download command"
                   th:text="|curl -fLO ${server}/download/${d.name} && chmod +x ${d.name}|">curl -fLO …</textarea>
-        <p class="hint">2. Run this there, then accept its request on the start page:</p>
+        <p class="hint">2. Run this there, then accept its request on the Requests page:</p>
         <textarea class="pubkey" readonly rows="2" aria-label="Command"
                   th:text="|./${d.name} --account ${account}|">./ssha-cli --account …</textarea>
         <p class="hint">
@@ -50,6 +53,7 @@
             in <code>~/.config/ssha</code>.
         </p>
     </th:block>
+</div>
 </main>
 </body>
 </html>

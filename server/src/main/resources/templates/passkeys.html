@@ -3,10 +3,11 @@
 <head>
     <th:block th:replace="~{fragments/head :: meta('ssha · passkeys')}"></th:block>
 </head>
-<body class="page">
-<main class="card">
-    <p><a href="/">← Sign requests</a></p>
-    <h1>Passkeys</h1>
+<body>
+<th:block th:replace="~{fragments/nav :: nav('passkeys')}"></th:block>
+<main class="wrap">
+<div class="col">
+    <h2>Passkeys</h2>
 
     <p class="notice" th:if="${param.new != null}">
         Your account is ready. Add a passkey now: without one, you can't get back in once this session ends.
@@ -20,8 +21,8 @@
             <div>
                 <strong th:text="${p.label}">Phone</strong>
                 <div class="hint">
-                    added <span th:text="${#temporals.format(p.created.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span><th:block th:if="${p.lastUsed}">,
-                    last used <span th:text="${#temporals.format(p.lastUsed.atZone(zone), 'yyyy-MM-dd HH:mm')}">2026-10-01 12:00</span></th:block>
+                    added <span th:text="${#temporals.format(p.created.atZone(zone), 'MMM d, yyyy')}">2026-10-01 12:00</span><th:block th:if="${p.lastUsed}">,
+                    last used <span th:text="${#temporals.format(p.lastUsed.atZone(zone), 'MMM d, yyyy')}">2026-10-01 12:00</span></th:block>
                 </div>
             </div>
             <form method="post" th:action="@{/passkeys/{id}/delete(id=${p.credentialId.toBase64UrlString()})}"
@@ -31,12 +32,15 @@
         </li>
     </ul>
 
+</div>
+<div class="col">
     <h2>Add a passkey</h2>
     <p class="error" id="error" hidden></p>
     <form class="inline" data-passkey-register>
         <input name="label" type="text" required maxlength="100" value="Phone" aria-label="Passkey name">
         <button type="submit" class="primary">Add</button>
     </form>
+</div>
 </main>
 <script src="/webauthn.js" defer></script>
 </body>

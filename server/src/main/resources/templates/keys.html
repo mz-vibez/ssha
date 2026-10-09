@@ -3,10 +3,11 @@
 <head>
     <th:block th:replace="~{fragments/head :: meta('ssha · SSH keys')}"></th:block>
 </head>
-<body class="page">
-<main class="card">
-    <p><a href="/">← Sign requests</a></p>
-    <h1>SSH keys</h1>
+<body>
+<th:block th:replace="~{fragments/nav :: nav('keys')}"></th:block>
+<main class="wrap">
+<div class="col">
+    <h2>SSH keys</h2>
 
     <p class="notice" th:if="${keys.isEmpty()}">
         No SSH keys yet. Create one below, then run <code>ssha-cli agent</code> on your computer.
@@ -23,11 +24,16 @@
                     <button type="submit" class="danger">Delete</button>
                 </form>
             </div>
-            <textarea class="pubkey" readonly rows="3" aria-label="authorized_keys line"
-                      th:text="${k.authorizedKey()}">ssh-ed25519 AAAA…</textarea>
+            <details>
+                <summary>authorized_keys line</summary>
+                <textarea class="pubkey" readonly rows="3" aria-label="authorized_keys line"
+                          th:text="${k.authorizedKey()}">ssh-ed25519 AAAA…</textarea>
+            </details>
         </li>
     </ul>
 
+</div>
+<div class="col">
     <h2>New key</h2>
     <p class="hint">
         Generated on this phone and stored in this browser, encrypted with your passkey. Every use needs
@@ -39,7 +45,8 @@
         <button type="submit" class="primary">Create</button>
     </form>
 
-    <h2>Import a key</h2>
+    <details>
+    <summary>Import a key</summary>
     <p class="hint">
         An Ed25519 or RSA (2048 bits or more) private key: an OpenSSH key file (<code>~/.ssh/id_ed25519</code>,
         <code>~/.ssh/id_rsa</code>; passphrase-protected or not), PKCS#1 or PKCS#8 PEM. It is read and encrypted on this phone; only the public key goes to the server.
@@ -56,13 +63,17 @@
                aria-label="Key name">
         <button type="submit" class="primary">Import</button>
     </form>
+    </details>
 
-    <h2>Use it</h2>
+    <details>
+    <summary>How to use a key</summary>
     <p class="hint">
         Add the key's line to <code>~/.ssh/authorized_keys</code> on a server (or as an SSH key on GitHub),
         run <code>ssha-cli agent</code> on your computer and point <code>SSH_AUTH_SOCK</code> at the socket it
-        prints. Sign requests then show up on the start page for you to approve.
+        prints. Sign requests then show up on the Requests page for you to approve.
     </p>
+    </details>
+</div>
 </main>
 <script src="/sshkey-import.js" defer></script>
 <script src="/ssh.js" defer></script>
