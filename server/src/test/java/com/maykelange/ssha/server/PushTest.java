@@ -162,6 +162,25 @@ class PushTest {
     }
 
     @Test
+    void theRequestCardRidesAlongWhenItFits() throws Exception {
+        String endpoint = "http://127.0.0.1:" + pushService.getAddress().getPort() + "/send/3";
+        push.save(new PushService.Subscription(endpoint, account, browserPublic, auth));
+
+        push.notify(account, new PushService.Notification("t", "b", "x", Duration.ofSeconds(60), "<section id=\"sign-1\"></section>"))
+                .get(5, TimeUnit.SECONDS);
+        push.notify(account, new PushService.Notification("t", "b", "y", Duration.ofSeconds(60), "x".repeat(4000)))
+                .get(5, TimeUnit.SECONDS);
+        assertThat(received).hasSize(2);
+        String small = new String(WebPushTest.decrypt(received.get(0).body(), browser.getPrivate(), browserPublic, auth),
+                StandardCharsets.UTF_8);
+        String big = new String(WebPushTest.decrypt(received.get(1).body(), browser.getPrivate(), browserPublic, auth),
+                StandardCharsets.UTF_8);
+        assertThat((String) JsonPath.read(small, "$.card")).isEqualTo("<section id=\"sign-1\"></section>");
+        // Too big for one push message: the notification still goes out, the page gets the card from the stream.
+        assertThat(big).doesNotContain("\"card\"");
+    }
+
+    @Test
     void goneSubscriptionsAreDropped() throws Exception {
         String endpoint = "http://127.0.0.1:" + pushService.getAddress().getPort() + "/send/2";
         push.save(new PushService.Subscription(endpoint, account, browserPublic, auth));

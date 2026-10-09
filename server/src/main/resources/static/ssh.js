@@ -245,14 +245,19 @@
         const checked = checkCard(card, data, record);
         checked.catch(() => {}); // reported by sign(), not as an unhandled rejection
         const signature = await sign(record, data, card.dataset.hash, checked);
-        const response = await fetch(`/sign/${card.dataset.request}/approve`, {
-            method: "POST",
-            headers: csrfHeaders(),
-            body: new URLSearchParams({ signature: b64url.encode(signature) }),
-        });
+        // Repeated while the connection fails: the server accepts the same signature again, so a lost
+        // answer can't turn into "already answered".
+        const error = card.querySelector("[data-sign-error]");
+        const response = await window.sshaPost(`/sign/${card.dataset.request}/approve`,
+            new URLSearchParams({ signature: b64url.encode(signature) }), {
+                onRetry: () => { error.textContent = "Poor connection, still sending…"; error.hidden = false; },
+            });
+        error.hidden = true;
         if (response.status === 404) throw new Error("this request was already answered or has expired");
         if (!response.ok) throw new Error(`server answered HTTP ${response.status}`);
-        // The server removes the card from every open page once the request is answered.
+        // The server removes the card from every open page once the request is answered; do not wait for
+        // the stream, which may be down.
+        card.remove();
     }
 
     document.addEventListener("click", (e) => {

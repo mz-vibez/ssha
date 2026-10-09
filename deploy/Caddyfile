@@ -1,5 +1,20 @@
 # Add to Caddy's configuration. Caddy gets the certificate, sets X-Forwarded-Proto/-Host/-For (which
-# the server honours), and streams the start page's Server-Sent Events without buffering.
+# the server honours), compresses the pages for slow connections, and streams the start page's
+# Server-Sent Events without buffering.
 ssha.apps.maykelange.com {
-	reverse_proxy 127.0.0.1:9091
+	# Compress text for slow connections (zstd where the browser knows it, else gzip). Never the event
+	# stream: compression buffers, and a stream held back looks dead to the phone.
+	@compressible not path /stream
+	encode @compressible zstd gzip
+
+	# The service worker must always be re-checked, or a new release never reaches the phone.
+	header /sw.js Cache-Control "no-cache"
+
+	reverse_proxy 127.0.0.1:9091 {
+		# Send every byte as it comes: no buffering of /stream.
+		flush_interval -1
+		# Fail over fast when the app restarts (docker compose restart) instead of showing an error.
+		lb_try_duration 5s
+		lb_try_interval 250ms
+	}
 }
