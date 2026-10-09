@@ -3,8 +3,9 @@
 An SSH agent whose keys live on your phone: every signature is approved, and made, on the phone.
 
 - `server/` — Spring Boot (port 9091). The phone pages are server-rendered Thymeleaf templates;
-  sign requests are rendered to HTML on the server and pushed over Server-Sent Events, htmx just
-  swaps them into the page.
+  sign requests are rendered to HTML on the server and pushed over Server-Sent Events (and, with the
+  card included, Web Push); a small `app.js` adds them to the page. No JS library; the service worker keeps the
+  page's files so the app opens fast on a bad connection.
 - `cli/` — plain Java 25 client (no Spring, also builds as a GraalVM native executable): the agent itself, plus account setup, enrolment and
   key listing, talking to the server's `/api` endpoints.
 

@@ -44,6 +44,8 @@ public class StreamHub {
             return emitter;
         }
         connectListeners.forEach(l -> l.accept(accountId, emitter));
+        // Everything pending has been sent: the page can drop cards it showed from a push that are gone.
+        send(emitter, "synced", "");
         return emitter;
     }
 
@@ -67,14 +69,17 @@ public class StreamHub {
         }
     }
 
-    /** Keeps idle connections alive through the load balancer. */
+    /**
+     * Keeps idle connections alive through the load balancer. A real event, not a comment: the page
+     * can only see events, and treats a stream that went quiet for too long as dead.
+     */
     @Scheduled(fixedRate = 20_000)
     public void heartbeat() {
         for (List<SseEmitter> list : emitters.values()) {
             for (SseEmitter emitter : list) {
                 try {
                     synchronized (emitter) {
-                        emitter.send(SseEmitter.event().comment("ping"));
+                        emitter.send(SseEmitter.event().name("ping").data(""));
                     }
                 } catch (IOException | IllegalStateException e) {
                     emitter.completeWithError(e);

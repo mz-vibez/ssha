@@ -64,7 +64,7 @@ public class EnrollService {
         pending.put(p.id(), p);
         p.result().orTimeout(props.joinTimeout().toMillis(), TimeUnit.MILLISECONDS).whenComplete((ok, error) -> {
             pending.remove(p.id());
-            streams.broadcast(accountId, "sign", "<div id=\"enroll-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
+            streams.broadcast(accountId, "sign", "<div id=\"enroll-" + p.id() + "\" data-remove></div>");
         });
         streams.broadcast(accountId, "sign", render(p));
         push.notify(accountId, new PushService.Notification("Sign-in link",

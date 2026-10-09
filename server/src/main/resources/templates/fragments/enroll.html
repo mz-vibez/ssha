@@ -20,8 +20,8 @@
         Accept only if you just ran <code>ssha-cli enroll</code> there and its terminal shows the same code.
     </p>
     <div class="actions">
-        <button type="button" class="deny" th:attr="hx-post=|/enroll/${p.id}/deny|" hx-swap="none">Deny</button>
-        <button type="button" class="approve" th:attr="hx-post=|/enroll/${p.id}/accept|" hx-swap="none">Accept</button>
+        <button type="button" class="deny" th:attr="data-post=|/enroll/${p.id}/deny|">Deny</button>
+        <button type="button" class="approve" th:attr="data-post=|/enroll/${p.id}/accept|">Accept</button>
     </div>
 </section>
 </body>

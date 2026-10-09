@@ -71,7 +71,7 @@ public class JoinService {
         pending.put(p.id(), p);
         p.result().orTimeout(props.joinTimeout().toMillis(), TimeUnit.MILLISECONDS).whenComplete((enrolled, error) -> {
             pending.remove(p.id());
-            streams.broadcast(accountId, "sign", "<div id=\"join-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
+            streams.broadcast(accountId, "sign", "<div id=\"join-" + p.id() + "\" data-remove></div>");
         });
         streams.broadcast(accountId, "sign", render(p));
         push.notify(accountId, new PushService.Notification("New computer",

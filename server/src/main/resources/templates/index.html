@@ -3,14 +3,10 @@
 <head>
     <th:block th:replace="~{fragments/head :: meta('ssha')}"></th:block>
     <meta name="vapid-key" th:content="${vapidKey}">
-    <!-- No eval, no injected <style> (the CSP forbids both), no <script> run from swapped content. -->
-    <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false}'>
-    <script src="/webjars/htmx.org/2.0.4/dist/htmx.min.js" defer></script>
-    <script src="/webjars/htmx-ext-sse/2.2.2/sse.js" defer></script>
     <script src="/app.js" defer></script>
     <script src="/ssh.js" defer></script>
 </head>
-<body hx-ext="sse" th:attr="sse-connect=@{/stream}">
+<body>
 <header>
     <h1>ssha</h1>
     <span id="status" class="status">offline</span>
@@ -30,7 +26,7 @@
         <button type="button" data-push-enable>Turn on notifications</button>
     </div>
     <!-- SSH sign requests waiting for approval; the stream sends every pending one on (re)connect. -->
-    <section id="approvals" sse-swap="sign" hx-swap="beforeend"></section>
+    <section id="approvals"></section>
     <p class="empty">
         No sign requests waiting.<br>
         Keep this page open while you use <code>ssha-cli agent</code>; requests show up here.<br>
