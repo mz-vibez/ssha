@@ -172,15 +172,20 @@ class SecurityTest {
     }
 
     @Test
+    void refusedFilesAreNotRememberedAsTheSignInTarget() throws Exception {
+        var session = mvc.perform(get("/app.js")).andExpect(status().is3xxRedirection())
+                .andReturn().getRequest().getSession(false);
+        assertThat(session == null || session.getAttribute("SPRING_SECURITY_SAVED_REQUEST") == null).isTrue();
+    }
+
+    @Test
     void pagesOnlyRunTheServersOwnScripts() throws Exception {
         mvc.perform(get("/").with(user(account)))
                 .andExpect(header().string("Content-Security-Policy", SecurityConfig.CONTENT_SECURITY_POLICY))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("/webjars/htmx.org/2.0.4/dist/htmx.min.js")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/app.js")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("unpkg"))));
         mvc.perform(get("/login")).andExpect(header().string("Content-Security-Policy",
                 org.hamcrest.Matchers.containsString("script-src 'self';")));
-        mvc.perform(get("/webjars/htmx.org/2.0.4/dist/htmx.min.js")).andExpect(status().isOk());
-        mvc.perform(get("/webjars/htmx-ext-sse/2.2.2/sse.js")).andExpect(status().isOk());
         mvc.perform(get("/confirm.js")).andExpect(status().isOk());
     }
 

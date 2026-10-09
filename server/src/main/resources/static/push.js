@@ -120,6 +120,9 @@
                 await post("/push/unsubscribe", { endpoint: subscription.endpoint }).catch(() => {});
                 await subscription.unsubscribe();
             });
+            // The phone keeps no page, request or file of the account it signed out of.
+            navigator.serviceWorker.controller?.postMessage("clear");
+            window.caches?.delete("ssha-cards");
             // Never hold up signing out for long.
             Promise.race([unsubscribe, new Promise((r) => setTimeout(r, 2000))]).catch(() => {}).finally(done);
         });

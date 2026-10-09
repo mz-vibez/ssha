@@ -79,7 +79,14 @@ public class SignService {
         }
     }
 
+    /** How long an approved request's signature is remembered, so the phone can safely repeat a lost approval. */
+    private static final java.time.Duration APPROVED_MEMORY = java.time.Duration.ofMinutes(2);
+
+    private record Approved(String accountId, byte[] signature, Instant at) {
+    }
+
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
+    private final Map<String, Approved> approved = new ConcurrentHashMap<>();
     /** Which browser answered a request, until its outcome is logged. */
     private final Map<String, String> answeredBy = new ConcurrentHashMap<>();
     private final StreamHub streams;
@@ -135,11 +142,12 @@ public class SignService {
         RANDOM.nextBytes(id);
         Pending p = new Pending(Base64.getUrlEncoder().withoutPadding().encodeToString(id), key, data.clone(),
                 algorithm, details, client, host, !waiting.isEmpty(), Instant.now(), new CompletableFuture<>());
+        approved.values().removeIf(a -> a.at().isBefore(Instant.now().minus(APPROVED_MEMORY)));
         pending.put(p.id(), p);
         p.result().orTimeout(props.signTimeout().toMillis(), TimeUnit.MILLISECONDS).whenComplete((sig, err) -> {
             pending.remove(p.id());
             logOutcome(p, err);
-            streams.broadcast(key.accountId(), "sign", "<div id=\"sign-" + p.id() + "\" hx-swap-oob=\"delete\"></div>");
+            streams.broadcast(key.accountId(), "sign", "<div id=\"sign-" + p.id() + "\" data-remove></div>");
         });
         streams.broadcast(key.accountId(), "sign", render(p));
         push.notify(key.accountId(), notification(p));
@@ -153,14 +161,28 @@ public class SignService {
 
     /** @param browser who answered, for the activity log */
     public void approve(String accountId, String id, byte[] signature, String browser) {
-        Pending p = find(accountId, id);
+        Pending p = pending.get(id);
+        if (p == null || !p.key().accountId().equals(accountId)) {
+            // On a bad connection the phone repeats an approval whose answer got lost: the same signature
+            // for a request that was just approved is a success, not an error.
+            Approved done = approved.get(id);
+            if (done != null && done.accountId().equals(accountId)
+                    && java.security.MessageDigest.isEqual(done.signature(), signature)
+                    && done.at().isAfter(Instant.now().minus(APPROVED_MEMORY))) {
+                return;
+            }
+        }
+        p = find(accountId, id);
         byte[] blob = SshWire.signatureBlob(p.algorithm(), signature);
         if (!SshWire.verify(p.key().publicKey(), p.data(), blob)) {
             throw new IllegalArgumentException("the signature does not match the key");
         }
         answered(p, browser);
-        if (p.result().complete(blob) && p.details().hostVerified()) {
-            knownHosts.login(accountId, p.details().hostKey());
+        if (p.result().complete(blob)) {
+            approved.put(id, new Approved(accountId, signature.clone(), Instant.now()));
+            if (p.details().hostVerified()) {
+                knownHosts.login(accountId, p.details().hostKey());
+            }
         }
     }
 
@@ -241,7 +263,8 @@ public class SignService {
         if (p.concurrent()) {
             body.append(". Other requests are waiting too: check that each one is yours.");
         }
-        return new PushService.Notification(d.kind(), body.toString(), "sign-" + p.id(), props.signTimeout());
+        return new PushService.Notification(d.kind(), body.toString(), "sign-" + p.id(), props.signTimeout(),
+                render(p));
     }
 
     private String render(Pending p) {

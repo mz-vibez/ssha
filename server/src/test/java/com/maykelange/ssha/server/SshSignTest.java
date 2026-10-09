@@ -200,6 +200,24 @@ class SshSignTest {
     }
 
     @Test
+    void repeatedApprovalOfTheSameSignatureSucceeds() throws Exception {
+        // The phone repeats an approval whose answer was lost on a bad connection.
+        byte[] data = "ssh wants this signed".getBytes(StandardCharsets.UTF_8);
+        startSign(data, null);
+        String id = onlyPending().id();
+        String signature = B64URL.encodeToString(sign(phoneKey.getPrivate(), "Ed25519", data));
+
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(post("/sign/" + id + "/approve").with(user(account)).with(csrf()).param("signature", signature))
+                    .andExpect(status().isNoContent());
+        }
+        // Another signature for the answered request is still refused.
+        mvc.perform(post("/sign/" + id + "/approve").with(user(account)).with(csrf())
+                        .param("signature", B64URL.encodeToString(sign(phoneKey.getPrivate(), "Ed25519", "other".getBytes(StandardCharsets.UTF_8)))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void wrongSignatureIsRejectedAndRequestStaysOpen() throws Exception {
         byte[] data = "data".getBytes(StandardCharsets.UTF_8);
         MvcResult pending = startSign(data, null);

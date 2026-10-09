@@ -49,9 +49,16 @@ public class PushService {
     /**
      * @param tag a request id: the phone replaces a notification with the same tag
      * @param ttl how long the push service should keep trying to deliver it
+     * @param card the request's rendered card, so the phone can show it without any network; null if none
      */
-    public record Notification(String title, String body, String tag, Duration ttl) {
+    public record Notification(String title, String body, String tag, Duration ttl, String card) {
+        public Notification(String title, String body, String tag, Duration ttl) {
+            this(title, body, tag, ttl, null);
+        }
     }
+
+    /** Keeps the encrypted message within one push record (4096 bytes, minus the headers). */
+    static final int MAX_PAYLOAD_WITH_CARD = 3500;
 
     record Subscription(String endpoint, String accountId, byte[] p256dh, byte[] auth) {
     }
@@ -127,8 +134,16 @@ public class PushService {
         message.put("tag", notification.tag());
         message.put("at", Instant.now().toEpochMilli());
         byte[] payload = JSON.writeValueAsString(message).getBytes(StandardCharsets.UTF_8);
+        if (notification.card() != null) {
+            message.put("card", notification.card());
+            byte[] withCard = JSON.writeValueAsString(message).getBytes(StandardCharsets.UTF_8);
+            if (withCard.length <= MAX_PAYLOAD_WITH_CARD) {
+                payload = withCard;
+            }
+        }
+        byte[] body = payload;
         return CompletableFuture.allOf(subscriptions(accountId).stream()
-                .map(s -> send(s, payload, notification.ttl()))
+                .map(s -> send(s, body, notification.ttl()))
                 .toArray(CompletableFuture[]::new));
     }
 

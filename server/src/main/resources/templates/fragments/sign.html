@@ -39,7 +39,7 @@
     </p>
     <p class="error" data-sign-error hidden></p>
     <div class="actions">
-        <button type="button" class="deny" th:attr="hx-post=|/sign/${p.id}/deny|" hx-swap="none">Deny</button>
+        <button type="button" class="deny" th:attr="data-post=|/sign/${p.id}/deny|">Deny</button>
         <button type="button" class="approve" data-ssh-approve>Approve</button>
     </div>
 </section>
