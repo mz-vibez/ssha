@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<header th:fragment="nav(active)">
+    <h1><a href="/">ssha</a></h1>
+    <span id="status" class="status" th:if="${active == 'home'}">offline</span>
+    <nav>
+        <a href="/" th:aria-current="${active == 'home'} ? 'page'">Requests</a>
+        <a href="/keys" th:aria-current="${active == 'keys'} ? 'page'">Keys</a>
+        <a href="/activity" th:aria-current="${active == 'activity'} ? 'page'">Activity</a>
+        <a href="/clients" th:aria-current="${active == 'clients'} ? 'page'">Computers</a>
+        <a href="/passkeys" th:aria-current="${active == 'passkeys'} ? 'page'">Passkeys</a>
+        <form method="post" th:action="@{/logout}"><button type="submit" class="link">Sign out</button></form>
+    </nav>
+</header>
+</body>
+</html>
