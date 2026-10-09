@@ -10,10 +10,13 @@
     <h2>Signed-in browsers</h2>
     <p class="notice" th:if="${browsers.isEmpty()}">No browser has been seen since the server started.</p>
     <ul class="passkeys" th:unless="${browsers.isEmpty()}">
-        <li th:each="b : ${browsers}">
+        <li th:each="b : ${browsers}"
+            th:with="split=${#strings.contains(b.label, ' · ')}">
             <div>
-                <strong th:text="${b.label}">203.0.113.5 · Safari</strong>
+                <strong class="addr" th:text="${split} ? ${#strings.substringBefore(b.label, ' · ')} : ${b.label}">203.0.113.5</strong>
                 <span class="hint" th:if="${b.current}">(this browser)</span>
+                <div class="hint ua" th:if="${split}" th:title="${#strings.substringAfter(b.label, ' · ')}"
+                     th:text="${#strings.substringAfter(b.label, ' · ')}">Mozilla/5.0 (iPhone) Safari</div>
                 <div class="hint">
                     signed in <span th:text="${#temporals.format(b.since.atZone(zone), 'MMM d, HH:mm')}">2026-10-01 12:00</span>,
                     last active <span th:text="${#temporals.format(b.lastSeen.atZone(zone), 'MMM d, HH:mm')}">2026-10-01 12:00</span>
@@ -47,13 +50,16 @@
     <h2>Web sign-ins</h2>
     <p class="notice" th:if="${webs.isEmpty()}">Nothing yet.</p>
     <ul class="passkeys" th:unless="${webs.isEmpty()}">
-        <li th:each="e : ${webs}">
+        <li th:each="e : ${webs}"
+            th:with="split=${e.source != null and #strings.contains(e.source, ' · ')}">
             <div>
                 <strong th:text="${e.event}">signed in with a passkey</strong>
                 <div class="hint">
                     <span th:text="${#temporals.format(e.at.atZone(zone), 'MMM d, HH:mm:ss')}">2026-10-01 12:00:00</span>
-                    <th:block th:if="${e.source}">from <span th:text="${e.source}">203.0.113.5 · Safari</span></th:block>
+                    <th:block th:if="${e.source}">from <span class="addr" th:text="${split} ? ${#strings.substringBefore(e.source, ' · ')} : ${e.source}">203.0.113.5</span></th:block>
                 </div>
+                <div class="hint ua" th:if="${split}" th:title="${#strings.substringAfter(e.source, ' · ')}"
+                     th:text="${#strings.substringAfter(e.source, ' · ')}">Mozilla/5.0 (iPhone) Safari</div>
             </div>
         </li>
     </ul>

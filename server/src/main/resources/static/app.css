@@ -165,6 +165,8 @@ button.danger { background: #dc2626; font-size: 14px; padding: 6px 12px; white-s
 .keys li { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .keys .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .keys .row > div, .passkeys li > div { min-width: 0; }
+.passkeys li { flex-wrap: wrap; }
+.passkeys li > div { flex: 1 1 280px; }
 .keys .ok { color: #16a34a; }
 .keys .bad { color: #dc2626; }
 textarea.pubkey {
@@ -224,3 +226,7 @@ summary { cursor: pointer; color: var(--phone); font-size: 14px; }
 details[open] > summary { margin-bottom: 8px; }
 .keys details { margin: 8px 0 0; }
 .wrap > .col { padding-bottom: 12px; }
+
+/* Addresses (can be 39-character IPv6) on one line when they fit; the user agent is clipped to one line. */
+.addr { font-size: 14px; }
+.ua { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
