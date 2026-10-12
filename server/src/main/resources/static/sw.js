@@ -1,21 +1,13 @@
 // Service worker, for a phone on a bad connection:
-//  - keeps the start page's files, so opening the app (e.g. from a notification) needs the network only for
-//    the page itself and the event stream, and not at all to show a request that arrived by push;
+//  - keeps the last start page, so opening the app (e.g. from a notification) works when the network is slow
+//    or down. The page's other files have the content hash in their URL and are kept by the browser itself;
 //  - shows push notifications for waiting requests, keeping the request's card for the page;
 //  - opens the start page when a notification is tapped.
-const SHELL = "ssha-shell-v1";
+const SHELL = "ssha-shell-v2";
 const CARDS = "ssha-cards";
-const FILES = ["/app.css", "/app.js", "/ssh.js", "/push.js", "/confirm.js", "/icon-192.png", "/manifest.webmanifest"];
 const PAGE_WAIT_MS = 3000;
 
-self.addEventListener("install", (event) => {
-    // One missing file (e.g. signed out) must not stop the worker from installing.
-    // Files that answer with a redirect (to the login page) are skipped: they are fetched on use later.
-    event.waitUntil(caches.open(SHELL).then((cache) => Promise.allSettled(FILES.map(async (file) => {
-        const response = await fetch(file);
-        if (response.ok && !response.redirected) await cache.put(file, response);
-    }))).then(() => self.skipWaiting()));
-});
+self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil((async () => {
     for (const name of await caches.keys()) {
         if (name !== SHELL && name !== CARDS) await caches.delete(name);
@@ -24,30 +16,12 @@ self.addEventListener("activate", (event) => event.waitUntil((async () => {
 })()));
 
 self.addEventListener("fetch", (event) => {
-    const request = event.request;
-    const url = new URL(request.url);
-    if (request.method !== "GET" || url.origin !== location.origin) return;
-    if (FILES.includes(url.pathname)) {
-        event.respondWith(staleWhileRevalidate(request));
-    } else if (request.mode === "navigate" && url.pathname === "/") {
-        event.respondWith(pageOrCached(request));
+    const url = new URL(event.request.url);
+    if (event.request.method === "GET" && url.origin === location.origin
+        && event.request.mode === "navigate" && url.pathname === "/") {
+        event.respondWith(pageOrCached(event.request));
     }
 });
-
-// Files: answer from the cache, refresh it in the background for the next time.
-async function staleWhileRevalidate(request) {
-    const cache = await caches.open(SHELL);
-    const cached = await cache.match(request);
-    const refresh = fetch(request).then((response) => {
-        if (response.ok && !response.redirected) cache.put(request, response.clone());
-        return response;
-    });
-    if (cached) {
-        refresh.catch(() => {});
-        return cached;
-    }
-    return refresh;
-}
 
 // The start page: from the network, but if that is slow or down, the last copy (the page is the same for
 // everything except the CSRF token, which stays valid for the whole session). A signed-out answer

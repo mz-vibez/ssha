@@ -3,8 +3,8 @@
 <head>
     <th:block th:replace="~{fragments/head :: meta('ssha')}"></th:block>
     <meta name="vapid-key" th:content="${vapidKey}">
-    <script src="/app.js" defer></script>
-    <script src="/ssh.js" defer></script>
+    <script th:src="@{/app.js}" defer></script>
+    <script th:src="@{/ssh.js}" defer></script>
 </head>
 <body>
 <th:block th:replace="~{fragments/nav :: nav('home')}"></th:block>

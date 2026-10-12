@@ -74,10 +74,14 @@ public class SecurityConfig {
                                  ActivityLog activity) throws Exception {
         http.authorizeHttpRequests(a -> a
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
-                        .requestMatchers("/login", "/login/ott", "/app.css", "/webauthn.js", "/favicon.ico", "/error")
+                        .requestMatchers("/login", "/login/ott", "/favicon.ico", "/error")
                         .permitAll()
-                        // The PWA's files: the browser fetches them without (or after the end of) a session.
-                        .requestMatchers("/manifest.webmanifest", "/sw.js", "/push.js", "/confirm.js", "/icon-*.png")
+                        // The files of the login page and the PWA: the browser fetches them without (or after the
+                        // end of) a session. Linked with a content hash in the name (app-<hash>.css), so both forms.
+                        .requestMatchers("/sw.js", "/icon-*.png",
+                                "/app.css", "/app-*.css", "/webauthn.js", "/webauthn-*.js",
+                                "/push.js", "/push-*.js", "/confirm.js", "/confirm-*.js",
+                                "/manifest.webmanifest", "/manifest-*.webmanifest")
                         .permitAll()
                         // The CLI: fetched with curl on computers that have no session.
                         .requestMatchers("/download/*").permitAll()

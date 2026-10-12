@@ -7,7 +7,7 @@ ssha.apps.maykelange.com {
 	@compressible not path /stream
 	encode @compressible zstd gzip
 
-	# The service worker must always be re-checked, or a new release never reaches the phone.
+	# The service worker script must always be re-checked, or a new release never reaches the phone.
 	header /sw.js Cache-Control "no-cache"
 
 	reverse_proxy 127.0.0.1:9091 {
