@@ -4,8 +4,8 @@ An SSH agent whose keys live on your phone: every signature is approved, and mad
 
 - `server/` — Spring Boot (port 9091). The phone pages are server-rendered Thymeleaf templates;
   sign requests are rendered to HTML on the server and pushed over Server-Sent Events (and, with the
-  card included, Web Push); a small `app.js` adds them to the page. No JS library; the service worker keeps the
-  page's files so the app opens fast on a bad connection.
+  card included, Web Push); a small `app.js` adds them to the page. No JS library; the service worker keeps the last
+  start page, and the page's files are cached by the browser for a year under content-hashed names.
 - `cli/` — plain Java 21 client (no Spring, also builds as a GraalVM native executable): the agent itself, plus account setup, enrolment and
   key listing, talking to the server's `/api` endpoints.
 

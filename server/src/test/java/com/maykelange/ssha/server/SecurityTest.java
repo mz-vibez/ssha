@@ -172,6 +172,18 @@ class SecurityTest {
     }
 
     @Test
+    void pageFilesAreLinkedByContentHashAndCachedForAYear() throws Exception {
+        // Public files of the login page: found by their hashed name without a session.
+        String login = mvc.perform(get("/login")).andReturn().getResponse().getContentAsString();
+        var m = java.util.regex.Pattern.compile("href=\"(/app-[0-9a-f]{32}\\.css)\"").matcher(login);
+        assertThat(m.find()).isTrue();
+        mvc.perform(get(m.group(1))).andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("max-age=31536000")));
+        // The unhashed name still works (service worker, bookmarks).
+        mvc.perform(get("/app.css")).andExpect(status().isOk());
+    }
+
+    @Test
     void refusedFilesAreNotRememberedAsTheSignInTarget() throws Exception {
         var session = mvc.perform(get("/app.js")).andExpect(status().is3xxRedirection())
                 .andReturn().getRequest().getSession(false);
@@ -182,7 +194,7 @@ class SecurityTest {
     void pagesOnlyRunTheServersOwnScripts() throws Exception {
         mvc.perform(get("/").with(user(account)))
                 .andExpect(header().string("Content-Security-Policy", SecurityConfig.CONTENT_SECURITY_POLICY))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("/app.js")))
+                .andExpect(content().string(org.hamcrest.Matchers.matchesPattern("(?s).*src=\"/app-[0-9a-f]{32}\\.js\".*")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("unpkg"))));
         mvc.perform(get("/login")).andExpect(header().string("Content-Security-Policy",
                 org.hamcrest.Matchers.containsString("script-src 'self';")));
