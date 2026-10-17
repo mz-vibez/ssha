@@ -13,6 +13,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.util.Collections;
+import java.util.List;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +27,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.core.context.SecurityContextImpl;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.webauthn.api.Bytes;
+import org.springframework.security.web.webauthn.api.ImmutablePublicKeyCredentialUserEntity;
+import org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -288,5 +301,52 @@ class SecurityTest {
     void publicTokenGenerationEndpointDeliversNothing() throws Exception {
         mvc.perform(post("/ott/generate").with(csrf()).param("username", account))
                 .andExpect(status().isNotFound());
+    }
+
+    // --- sessions survive a restart (server.servlet.session.persistent) -------------------------
+
+    @Test
+    void signupSessionSurvivesRestart() throws Exception {
+        MockHttpSession session = (MockHttpSession) mvc.perform(post("/signup").with(csrf()))
+                .andExpect(status().isFound()).andReturn().getRequest().getSession();
+        mvc.perform(get("/").session(restarted(session))).andExpect(status().isOk());
+    }
+
+    @Test
+    void linkSessionSurvivesRestart() throws Exception {
+        var token = oneTimeTokens.generate(new org.springframework.security.authentication.ott.GenerateOneTimeTokenRequest(account));
+        MockHttpSession session = (MockHttpSession) mvc.perform(post("/login/ott").with(csrf()).param("token", token.getTokenValue()))
+                .andExpect(status().isFound()).andReturn().getRequest().getSession();
+        mvc.perform(get("/").session(restarted(session))).andExpect(status().isOk());
+    }
+
+    @Test
+    void passkeySessionSurvivesRestart() throws Exception {
+        var user = ImmutablePublicKeyCredentialUserEntity.builder()
+                .name(account).id(Bytes.random()).displayName(account).build();
+        var auth = new WebAuthnAuthentication(user, AuthorityUtils.createAuthorityList("ROLE_USER"));
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, new SecurityContextImpl(auth));
+        mvc.perform(get("/").session(restarted(session))).andExpect(status().isOk());
+    }
+
+    /**
+     * The session as Tomcat brings it back after a restart: every attribute written with Java
+     * serialization and read back. Fails if any of them, or anything they hold, isn't serializable.
+     */
+    private static MockHttpSession restarted(MockHttpSession session) throws Exception {
+        MockHttpSession copy = new MockHttpSession(null, session.getId());
+        List<String> names = Collections.list(session.getAttributeNames());
+        assertThat(names).isNotEmpty();
+        for (String name : names) {
+            var bytes = new ByteArrayOutputStream();
+            try (var out = new ObjectOutputStream(bytes)) {
+                out.writeObject(session.getAttribute(name));
+            }
+            try (var in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+                copy.setAttribute(name, in.readObject());
+            }
+        }
+        return copy;
     }
 }
