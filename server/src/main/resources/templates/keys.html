@@ -18,7 +18,8 @@
                 <div>
                     <strong th:text="${k.label}">laptop</strong>
                     <div class="hint"><span th:text="${k.type()}">ED25519</span> · <code th:text="${k.fingerprint()}">SHA256:…</code></div>
-                    <div class="hint" data-ssh-device>checking this device…</div>
+                    <div class="hint"><span data-ssh-device>checking this device…</span>
+                        <button type="button" class="link" data-ssh-sync hidden>Sync</button></div>
                 </div>
                 <form method="post" th:action="@{/keys/{id}/delete(id=${k.id})}" data-ssh-delete>
                     <button type="submit" class="danger">Delete</button>
@@ -32,12 +33,26 @@
         </li>
     </ul>
 
+    <div class="device" data-vault-device hidden>
+        <h3>This device</h3>
+        <p class="hint">
+            Your SSH keys are synced, but this device can't use them yet. Another device of yours that has
+            them must hand them over.
+        </p>
+        <p class="error" id="device-error" hidden></p>
+        <button type="button" class="primary" data-vault-unlock>Get the SSH keys</button>
+        <p data-vault-waiting hidden>
+            Asked your other devices. On one that has the keys, open Requests and approve the request
+            with the code <strong data-vault-code>123 456</strong>. Keep this page open.
+        </p>
+    </div>
 </div>
 <div class="col">
     <h2>New key</h2>
     <p class="hint">
-        Generated on this phone and stored in this browser, encrypted with your passkey. Every use needs
-        your approval with the passkey. If this browser's data is cleared, the key is gone.
+        Generated on this phone and encrypted with your account's vault key, which only your passkeys can
+        open; the server keeps it encrypted. Every use needs your approval with a passkey. Your other
+        devices can use it once one of yours hands them the vault key.
     </p>
     <p class="error" id="error" hidden></p>
     <form class="inline" data-ssh-new-key>
@@ -49,8 +64,8 @@
     <summary>Import a key</summary>
     <p class="hint">
         An Ed25519 or RSA (2048 bits or more) private key: an OpenSSH key file (<code>~/.ssh/id_ed25519</code>,
-        <code>~/.ssh/id_rsa</code>; passphrase-protected or not), PKCS#1 or PKCS#8 PEM. It is read and encrypted on this phone; only the public key goes to the server.
-        Importing the same key on another device makes it usable there too.
+        <code>~/.ssh/id_rsa</code>; passphrase-protected or not), PKCS#1 or PKCS#8 PEM. It is read and encrypted on this phone; the server only gets the public key and
+        the encrypted private key.
     </p>
     <p class="error" id="import-error" hidden></p>
     <form class="stacked" data-ssh-import>

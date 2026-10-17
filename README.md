@@ -102,14 +102,25 @@ The CLI targets the public URL by default; override with `--url http://localhost
 
 The phone holds the SSH keys; the computer only gets signatures, and each one needs a tap on the phone.
 
-1. On the phone, open **Keys** and create a key. It is an Ed25519 key generated in the browser and stored
-   in the browser's IndexedDB, encrypted (AES-GCM) with a secret derived from your passkey via the WebAuthn
-   PRF extension. The server only gets the public key.
+1. On the phone, open **Keys** and create a key. It is an Ed25519 key generated in the browser and
+   encrypted there (AES-GCM) with the account's vault key; the server stores the public key and the
+   encrypted private key. The vault key is made in the browser too and never reaches the server
+   unencrypted: the server keeps one copy per passkey, encrypted with a secret derived from that passkey
+   via the WebAuthn PRF extension.
    Or **import** an existing Ed25519 or RSA key on the same page: pick or paste an OpenSSH private key
    file (passphrase-protected or not; aes-ctr/aes-gcm, as `ssh-keygen` writes them), an RSA PKCS#1 PEM
    (`BEGIN RSA PRIVATE KEY`) or an unencrypted PKCS#8 PEM key. The file is decrypted and re-encrypted
-   under your passkey on the phone; only the public key is sent. Importing the same key in another
-   browser adds it there under the existing entry.
+   under the vault key on the phone.
+   - **Other devices**: a passkey synced to another device (iCloud Keychain, Google Password Manager, …)
+     opens the vault there too. A device with a passkey of its own asks for the keys with **Get the SSH
+     keys** on its Keys page; it sends an ECDH public key, and a device that has the vault key approves the
+     request on its start page and encrypts the vault key to it. Both show the same code (derived from the
+     public key): approve only if they match.
+   - Deleting a passkey deletes its copy of the vault key. When no passkey has one left, the keys are
+     lost; a device that has the vault key can't be shut out after the fact (that would need a new vault
+     key).
+   - Keys made before the vault are kept only in the browser that made them; **Sync** next to such a key
+     moves it into the vault.
    - RSA keys need at least 2048 bits. They sign with rsa-sha2-256 or rsa-sha2-512, whichever ssh asks
      for; legacy SHA-1 `ssh-rsa` signatures are refused (OpenSSH disables them by default too).
    - Old-style passphrase-protected PEM files (`Proc-Type: 4,ENCRYPTED`) can't be read; convert them with
