@@ -26,7 +26,8 @@ import com.maykelange.ssha.server.activity.ActivityLog;
 
 /**
  * The phone's side of the SSH agent: managing its keys and answering sign requests. Keys are
- * generated and used in the browser (ssh.js); the server only ever sees public keys and signatures.
+ * generated and used in the browser (ssh.js); the server only ever sees public keys, signatures,
+ * and private keys encrypted under the account's vault key.
  */
 @Controller
 public class KeysController {
@@ -45,8 +46,12 @@ public class KeysController {
         return "keys";
     }
 
-    /** @param publicKey the SSH public key blob (Ed25519 or RSA), base64url */
-    public record NewKey(String label, String publicKey) {
+    /**
+     * @param publicKey the SSH public key blob (Ed25519 or RSA), base64url
+     * @param iv        with {@code data}: the private key encrypted under the vault key; absent for a
+     *                  key kept in one browser only (as before the vault)
+     */
+    public record NewKey(String label, String publicKey, String iv, String data) {
     }
 
     @PostMapping(value = "/keys", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -66,7 +71,17 @@ public class KeysController {
         // The same key imported on another device is the same key: keep the existing entry.
         SshKey key = sshKeys.findByPublicKey(principal.getName(), blob)
                 .orElseGet(() -> sshKeys.add(principal.getName(), label, blob));
+        if (request.data() != null) {
+            sshKeys.seal(principal.getName(), key.id(), decode(request.iv()), decode(request.data()));
+        }
         return Map.of("id", key.id(), "authorizedKey", key.authorizedKey());
+    }
+
+    private static byte[] decode(String base64url) {
+        if (base64url == null) {
+            throw new IllegalArgumentException("invalid encrypted key");
+        }
+        return Base64.getUrlDecoder().decode(base64url);
     }
 
     @PostMapping("/keys/{id}/delete")

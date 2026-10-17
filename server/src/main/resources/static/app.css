@@ -169,6 +169,7 @@ button.danger { background: #dc2626; font-size: 14px; padding: 6px 12px; white-s
 .passkeys li > div { flex: 1 1 280px; }
 .keys .ok { color: #16a34a; }
 .keys .bad { color: #dc2626; }
+.device { margin-top: 24px; }
 textarea.pubkey {
     width: 100%;
     display: block;

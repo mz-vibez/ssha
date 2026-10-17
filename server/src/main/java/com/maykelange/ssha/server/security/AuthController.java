@@ -1,8 +1,6 @@
 package com.maykelange.ssha.server.security;
 
 import java.security.Principal;
-import java.util.Comparator;
-import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -16,10 +14,6 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.webauthn.api.Bytes;
-import org.springframework.security.web.webauthn.api.CredentialRecord;
-import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
-import org.springframework.security.web.webauthn.management.PublicKeyCredentialUserEntityRepository;
-import org.springframework.security.web.webauthn.management.UserCredentialRepository;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,13 +28,14 @@ import jakarta.servlet.http.HttpServletResponse;
 import com.maykelange.ssha.server.SshaProperties;
 import com.maykelange.ssha.server.account.Accounts;
 import com.maykelange.ssha.server.activity.ActivityLog;
+import com.maykelange.ssha.server.vault.VaultSlots;
 
 /** Login page, account creation, one-time-link landing page and passkey management. */
 @Controller
 public class AuthController {
 
-    private final PublicKeyCredentialUserEntityRepository userEntities;
-    private final UserCredentialRepository credentials;
+    private final Passkeys passkeys;
+    private final VaultSlots vaultSlots;
     private final Accounts accounts;
     private final UserDetailsService users;
     private final SshaProperties props;
@@ -49,11 +44,10 @@ public class AuthController {
     private final SecurityContextHolderStrategy contexts = SecurityContextHolder.getContextHolderStrategy();
     private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();
 
-    public AuthController(PublicKeyCredentialUserEntityRepository userEntities, UserCredentialRepository credentials,
-                          Accounts accounts, UserDetailsService users, SshaProperties props, RateLimits limits,
-                          ActivityLog activity) {
-        this.userEntities = userEntities;
-        this.credentials = credentials;
+    public AuthController(Passkeys passkeys, VaultSlots vaultSlots, Accounts accounts, UserDetailsService users,
+                          SshaProperties props, RateLimits limits, ActivityLog activity) {
+        this.passkeys = passkeys;
+        this.vaultSlots = vaultSlots;
         this.accounts = accounts;
         this.users = users;
         this.props = props;
@@ -105,29 +99,20 @@ public class AuthController {
 
     @GetMapping("/passkeys")
     public String passkeys(Principal principal, Model model) {
-        model.addAttribute("passkeys", passkeysOf(principal));
+        model.addAttribute("passkeys", passkeys.of(principal.getName()));
         return "passkeys";
     }
 
     @PostMapping("/passkeys/{id}/delete")
     public String delete(@PathVariable String id, Principal principal, HttpServletRequest request) {
         Bytes credentialId = Bytes.fromBase64(id);
-        boolean owned = passkeysOf(principal).stream().anyMatch(c -> c.getCredentialId().equals(credentialId));
-        if (!owned) {
+        if (!passkeys.owns(principal.getName(), credentialId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         }
-        credentials.delete(credentialId);
+        passkeys.delete(credentialId);
+        // Its copy of the vault key goes with it: devices with only this passkey lose the SSH keys.
+        vaultSlots.delete(principal.getName(), credentialId);
         activity.web(principal.getName(), "deleted a passkey", null, request);
         return "redirect:/passkeys";
-    }
-
-    private List<CredentialRecord> passkeysOf(Principal principal) {
-        PublicKeyCredentialUserEntity user = userEntities.findByUsername(principal.getName());
-        if (user == null) {
-            return List.of();
-        }
-        return credentials.findByUserId(user.getId()).stream()
-                .sorted(Comparator.comparing(CredentialRecord::getCreated))
-                .toList();
     }
 }

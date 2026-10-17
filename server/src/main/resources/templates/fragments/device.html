@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<section th:fragment="device" class="sign join" th:id="|device-${p.id}|"
+         th:attr="data-vault-request=${p.id},data-public-key=${p.publicKeyBase64()},data-code=${p.code}">
+    <div class="sign-title warn">
+        <strong>New device</strong>
+        <time th:datetime="${p.requestedAt}"
+              th:text="${#temporals.format(p.requestedAt.atZone(T(java.time.ZoneId).systemDefault()), 'HH:mm:ss')}">12:00:00</time>
+    </div>
+    <dl>
+        <dt>Device</dt>
+        <dd th:text="${p.device}">192.0.2.1 Mozilla/5.0</dd>
+        <dt>Code</dt>
+        <dd><strong th:text="${p.code}">123 456</strong></dd>
+    </dl>
+    <p class="warning">
+        Wants your SSH keys: once given, that device can use them with its own passkey. Approve only if you
+        just asked for them on the Keys page there and it shows the same code.
+    </p>
+    <p class="error" data-sign-error hidden></p>
+    <div class="actions">
+        <button type="button" class="deny" th:attr="data-post=|/vault/devices/${p.id}/deny|">Deny</button>
+        <button type="button" class="approve" data-vault-approve>Approve</button>
+    </div>
+</section>
+</body>
+</html>

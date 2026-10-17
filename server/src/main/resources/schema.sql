@@ -27,7 +27,8 @@ create table if not exists user_credentials
     primary key (credential_id)
 );
 
--- Public halves of the phone's SSH keys (the private keys stay in the phone's browser).
+-- The account's SSH keys: the public half, and the private half encrypted in the browser under the
+-- account's vault key (key_iv, key_data; null for keys still kept only in one browser's storage).
 create table if not exists ssh_keys
 (
     id         varchar(64)  not null,
@@ -98,3 +99,19 @@ create table if not exists activity
     source     varchar(300)
 );
 create index if not exists activity_account on activity (account_id, id);
+
+alter table ssh_keys add column if not exists key_iv varbinary(12);
+alter table ssh_keys add column if not exists key_data varbinary(8192);
+
+-- The account's vault key, made in a browser and never seen here: stored once per passkey, encrypted
+-- under that passkey's PRF output. A passkey without a slot gets one when a device that has the key
+-- hands it over (see VaultJoins).
+create table if not exists vault_slots
+(
+    account_id    varchar(64)   not null,
+    credential_id varchar(1000) not null,
+    iv            varbinary(12) not null,
+    wrapped       varbinary(64) not null,
+    created       timestamp     not null,
+    primary key (account_id, credential_id)
+);

@@ -26,7 +26,7 @@
                 </div>
             </div>
             <form method="post" th:action="@{/passkeys/{id}/delete(id=${p.credentialId.toBase64UrlString()})}"
-                  data-confirm="Delete this passkey?">
+                  data-confirm="Delete this passkey? Devices that only have this passkey lose access to the synced SSH keys. If it is the last passkey holding them, the keys are gone for good.">
                 <button type="submit" class="danger">Delete</button>
             </form>
         </li>

@@ -10,13 +10,28 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
-/** Public keys of the phone's SSH keys, by account. Private keys never reach the server. */
+/**
+ * The account's SSH keys: public halves, and private halves encrypted in the browser under the
+ * account's vault key, which the server never has (see VaultSlots).
+ */
 @Repository
 public class SshKeys {
 
     private static final RowMapper<SshKey> ROW = (rs, n) -> new SshKey(rs.getString("id"), rs.getString("account_id"),
             rs.getString("label"),
             rs.getBytes("public_key"), rs.getTimestamp("created").toInstant());
+
+    /**
+     * A private key as the browser encrypted it (AES-GCM, the public key blob as additional data).
+     *
+     * @param type "ssh-ed25519" or "ssh-rsa"
+     * @param data the PKCS#8 private key, encrypted
+     */
+    public record Sealed(String id, String type, byte[] publicKey, byte[] iv, byte[] data) {
+    }
+
+    /** Large enough for an 8192-bit RSA key's PKCS#8 encoding plus the GCM tag. */
+    public static final int MAX_SEALED_LENGTH = 8192;
 
     private final JdbcTemplate jdbc;
 
@@ -47,6 +62,23 @@ public class SshKeys {
             throw new IllegalArgumentException("this key is already in use by another account");
         }
         return key;
+    }
+
+    /** The account's keys whose private half is stored here. */
+    public List<Sealed> sealed(String accountId) {
+        return jdbc.query("select * from ssh_keys where account_id = ? and key_data is not null order by created",
+                (rs, n) -> new Sealed(rs.getString("id"), SshWire.algorithm(rs.getBytes("public_key")),
+                        rs.getBytes("public_key"), rs.getBytes("key_iv"), rs.getBytes("key_data")),
+                accountId);
+    }
+
+    /** Stores the key's encrypted private half, unless it has one already (the first copy stays). */
+    public void seal(String accountId, String id, byte[] iv, byte[] data) {
+        if (iv == null || iv.length != 12 || data == null || data.length < 16 || data.length > MAX_SEALED_LENGTH) {
+            throw new IllegalArgumentException("invalid encrypted key");
+        }
+        jdbc.update("update ssh_keys set key_iv = ?, key_data = ? where account_id = ? and id = ? and key_data is null",
+                iv, data, accountId, id);
     }
 
     public boolean delete(String accountId, String id) {

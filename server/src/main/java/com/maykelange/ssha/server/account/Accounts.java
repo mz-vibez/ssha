@@ -105,7 +105,7 @@ public class Accounts {
         return jdbc.update("delete from clients where account_id = ? and id = ?", accountId, clientId) > 0;
     }
 
-    static String randomId(int bytes) {
+    public static String randomId(int bytes) {
         byte[] random = new byte[bytes];
         RANDOM.nextBytes(random);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(random);
