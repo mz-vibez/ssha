@@ -115,16 +115,30 @@
      * the browser may offer; empty for any passkey of this site.
      */
     async function tap({ allow = [], first, second }) {
-        const cred = await navigator.credentials.get({
-            publicKey: {
-                challenge: crypto.getRandomValues(new Uint8Array(32)),
-                userVerification: "required",
-                allowCredentials: allow.map((id) => ({
-                    type: "public-key", id: typeof id === "string" ? b64url.decode(id) : id,
-                })),
-                extensions: { prf: { eval: second ? { first, second } : { first } } },
-            },
-        });
+        // Plain ArrayBuffer copies: passkey-provider extensions (KeePassXC) intercept this call, and the
+        // PRF inputs they forward must convert to an ArrayBuffer there, which a view onto a shared one may not.
+        const bytes = (view) => {
+            const u8 = view instanceof ArrayBuffer ? new Uint8Array(view) : new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+            return u8.slice().buffer;
+        };
+        let cred;
+        try {
+            cred = await navigator.credentials.get({
+                publicKey: {
+                    challenge: bytes(crypto.getRandomValues(new Uint8Array(32))),
+                    userVerification: "required",
+                    allowCredentials: allow.map((id) => ({
+                        type: "public-key", id: bytes(typeof id === "string" ? b64url.decode(id) : id),
+                    })),
+                    extensions: { prf: { eval: second ? { first: bytes(first), second: bytes(second) } : { first: bytes(first) } } },
+                },
+            });
+        } catch (e) {
+            if (e instanceof TypeError) {
+                throw new Error("this passkey provider doesn't support the PRF extension needed to protect SSH keys (" + e.message + ")");
+            }
+            throw e;
+        }
         const results = cred.getClientExtensionResults().prf?.results;
         if (!results?.first || (second && !results.second)) {
             throw new Error("this passkey can't protect SSH keys (its provider doesn't support the PRF extension)");
